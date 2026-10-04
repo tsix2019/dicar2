@@ -20,7 +20,7 @@
 
 | | |
 |---|---|
-| **孪生主页** | 车辆俯视图（四门两盖、车窗与天窗开度、四轮胎压胎温、转向灯、泊车雷达实时联动）+ 车速/转速/功率/电量四块圆弧仪表 + 近 3 分钟趋势曲线（发动机介入时自动增加转速曲线） |
+| **孪生主页** | 横屏三栏：左转速大表盘、中大号车速 + 车辆俯视图（四门两盖、车窗与天窗开度、四轮胎压胎温、转向灯、泊车雷达实时联动）、右驱动/回收双向功率条与电量油量；底栏近 3 分钟趋势曲线（发动机介入时自动增加转速曲线）+ 空调/胎压/车门状态。竖屏自动改为上下堆叠 |
 | **卡片视图** | 动力、电池、空调、车身、其他五类全量读数 |
 | **控制** | 空调开关 / 温度 / 风量 / 出风模式 / 循环、座椅加热通风、四门车窗、天窗、遮阳帘、前挡除霜 |
 | **悬浮窗** | 浮在其他应用之上，内容（主读数 / 仪表 / 曲线 / 孪生图 / 明细）可自由勾选，透明度可调，可拖动 |
@@ -100,7 +100,7 @@ floating overlay. **Everything runs on-device; nothing is uploaded.**
 
 | | |
 |---|---|
-| **Twin dashboard** | Top-down car view (doors, window/sunroof position, tyre pressure and temperature, turn signals, parking radar — all live) + speed/RPM/power/SoC arc gauges + 3-minute trend chart (an engine-RPM series appears automatically once the engine kicks in) |
+| **Twin dashboard** | Three columns in landscape: a large RPM dial on the left; big speed readout plus a top-down car view (doors, window/sunroof position, tyre pressure and temperature, turn signals, parking radar — all live) in the middle; a bidirectional drive/regen power bar with battery and fuel levels on the right. A bottom strip carries the 3-minute trend chart (an engine-RPM series appears automatically once the engine kicks in) and climate/tyre/door status pills. Stacks vertically in portrait |
 | **Card view** | Full readouts grouped into powertrain, battery, climate, body and misc |
 | **Controls** | A/C power, temperature, fan, vent mode, recirculation, seat heating/ventilation, all four windows, sunroof, sunshade, windshield defrost |
 | **Floating overlay** | Floats above other apps; which blocks to show (readout / gauges / chart / twin view / details) and the opacity are configurable, and it is draggable |

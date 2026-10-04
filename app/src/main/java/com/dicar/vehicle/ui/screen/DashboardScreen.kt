@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -48,8 +49,12 @@ import com.dicar.vehicle.ui.MainViewModel
 import com.dicar.vehicle.ui.components.AcPanel
 import com.dicar.vehicle.ui.components.BatteryCard
 import com.dicar.vehicle.ui.components.BodyCard
+import com.dicar.vehicle.ui.components.GearBadge
 import com.dicar.vehicle.ui.components.MiscCard
 import com.dicar.vehicle.ui.components.PowerCard
+import com.dicar.vehicle.ui.components.StatusDot
+import com.dicar.vehicle.util.Format
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -185,12 +190,20 @@ private fun SideRail(
             )
         },
     ) {
+        // 选中态统一用强调蓝，不用 Material 默认的 secondaryContainer（那是绿色，
+        // 这套配色里绿色专门表示电量，不能拿来当「选中」）
+        val railColors = NavigationRailItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.primary,
+            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+        )
         MainTab.entries.forEach { item ->
             NavigationRailItem(
                 selected = tab == item,
                 onClick = { onTab(item) },
                 icon = { Text(item.glyph, fontSize = 20.sp) },
                 label = { Text(item.label) },
+                colors = railColors,
             )
         }
         Spacer(Modifier.weight(1f))
@@ -199,19 +212,21 @@ private fun SideRail(
             onClick = onToggleFloating,
             icon = { Text("◳", fontSize = 20.sp) },
             label = { Text("悬浮窗") },
+            colors = railColors,
         )
         NavigationRailItem(
             selected = false,
             onClick = onSettings,
             icon = { Text("⚙", fontSize = 20.sp) },
             label = { Text("设置") },
+            colors = railColors,
         )
         Spacer(Modifier.height(12.dp))
     }
 }
 
 /**
- * 顶部状态条：数据源、采样时刻与刷新间隔。
+ * 顶栏：左边是车辆当前状态（挡位、动力、模式），右边是数据源、车外温度和时间。
  * [compact] 为 true 时说明左侧已有导航栏，这里就不再重复放导航和按钮。
  */
 @Composable
@@ -225,65 +240,117 @@ private fun StatusStrip(
     onToggleFloating: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val time = if (state.timestamp > 0) {
-        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(state.timestamp))
-    } else "--"
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (!compact) {
-            Text("DiCar", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1)
-            Spacer(Modifier.width(12.dp))
             SingleChoiceSegmentedButtonRow {
                 MainTab.entries.forEachIndexed { index, item ->
                     SegmentedButton(
                         selected = tab == item,
                         onClick = { onTab(item) },
                         shape = SegmentedButtonDefaults.itemShape(index, MainTab.entries.size),
+                        // 同样把默认的绿色选中态换成强调蓝，绿色留给电量
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            activeBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
                     ) { Text(item.label, maxLines = 1) }
                 }
             }
-            Spacer(Modifier.width(12.dp))
         }
-        SourceChip(state)
+        GearBadge(state.gear)
+        val (powerText, powerColor) = powertrainStatus(state)
+        StatusDot(powerText, powerColor)
         Text(
-            "$time · ${intervalMs}ms",
+            modeSummary(state),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 12.dp),
+            modifier = Modifier.weight(1f),
+        )
+        SourceChip(state, intervalMs)
+        Text(
+            "车外 ${Format.num(state.outsideTemp, 0, "℃")}",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        Text(
+            rememberClock(),
+            style = MaterialTheme.typography.titleSmall,
+            textAlign = TextAlign.End,
+            maxLines = 1,
         )
         if (compact) return@Row
         TextButton(onClick = onToggleFloating) {
             Text(if (floatingOn) "关闭悬浮窗" else "悬浮窗", maxLines = 1)
         }
-        TextButton(onClick = onSettings) { Text("⚙ 设置", maxLines = 1) }
+        TextButton(onClick = onSettings) { Text("⚙", maxLines = 1) }
     }
 }
 
+/** 顶栏的动力状态：有发动机数据就说发动机，没有就退回电机，都没有才 N/A。 */
 @Composable
-private fun SourceChip(state: VehicleState) {
+private fun powertrainStatus(state: VehicleState): Pair<String, androidx.compose.ui.graphics.Color> {
+    val scheme = MaterialTheme.colorScheme
+    val motor = state.displayRpm
+    return when {
+        state.engineRpm != null && state.engineRpm > ENGINE_IDLE_RPM -> "发动机运行中" to scheme.primary
+        state.engineRpm != null -> "发动机已停" to scheme.outline
+        motor != null && kotlin.math.abs(motor) > MOTOR_IDLE_RPM -> "电机驱动中" to scheme.secondary
+        motor != null -> "电机待机" to scheme.outline
+        else -> "动力 ${Format.NA}" to scheme.outline
+    }
+}
+
+/** 「HEV · 经济」这种模式串；两个都读不到就显示 N/A。 */
+private fun modeSummary(state: VehicleState): String =
+    listOfNotNull(state.workMode, state.driveMode)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+        .ifEmpty { Format.NA }
+
+/** 墙上时钟，每 20 秒刷一次（只显示到分钟，不需要更勤）。 */
+@Composable
+private fun rememberClock(): String {
+    var text by remember { mutableStateOf(nowHhMm()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            text = nowHhMm()
+            delay(20_000)
+        }
+    }
+    return text
+}
+
+private fun nowHhMm(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+@Composable
+private fun SourceChip(state: VehicleState, intervalMs: Long) {
     val ok = state.source != null && state.error == null
     Text(
-        text = "数据源：" + (state.source?.label ?: "无"),
-        style = MaterialTheme.typography.labelLarge,
+        text = (state.source?.label ?: "无数据源") + " · ${intervalMs}ms",
+        style = MaterialTheme.typography.labelMedium,
         maxLines = 1,
-        color = if (ok) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+        color = if (ok) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
         modifier = Modifier
             .background(
-                if (ok) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
-                RoundedCornerShape(8.dp),
+                if (ok) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.errorContainer,
+                RoundedCornerShape(50),
             )
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
     )
 }
+
+private const val ENGINE_IDLE_RPM = 300
+private const val MOTOR_IDLE_RPM = 50
 
 @Composable
 private fun ErrorBanner(message: String) {

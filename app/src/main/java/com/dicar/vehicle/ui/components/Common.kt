@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,10 +33,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dicar.vehicle.util.Format
 
-/** 首页数据卡片外壳。 */
+/**
+ * 数据卡片外壳：白卡 + 细描边 + 不投影，标题是小字浅色（强调色留给数据本身，
+ * 不浪费在标题上）。[title] 传 null 则不画标题行，用于底栏这类只有内容的卡片。
+ */
 @Composable
 fun DataCard(
-    title: String,
+    title: String?,
     modifier: Modifier = Modifier,
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
@@ -47,15 +51,16 @@ fun DataCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                trailing?.invoke()
+            if (title != null || trailing != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title.orEmpty(),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    trailing?.invoke()
+                }
             }
             content()
         }
@@ -70,8 +75,8 @@ fun BigMetric(value: String, unit: String, label: String, modifier: Modifier = M
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value,
+                style = MaterialTheme.typography.displayMedium,
                 fontSize = size,
-                fontWeight = FontWeight.Bold,
                 color = if (na) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
             )
             if (!na && unit.isNotEmpty()) {
@@ -161,7 +166,7 @@ fun Stepper(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        FilledTonalButton(onClick = onMinus, enabled = enabled, modifier = Modifier.size(56.dp, 48.dp), contentPadding = PaddingValues(0.dp)) {
+        FilledTonalButton(onClick = onMinus, enabled = enabled, colors = stepperColors(), modifier = Modifier.size(56.dp, 48.dp), contentPadding = PaddingValues(0.dp)) {
             Text("−", fontSize = 22.sp)
         }
         Row(
@@ -180,8 +185,19 @@ fun Stepper(
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
             }
         }
-        FilledTonalButton(onClick = onPlus, enabled = enabled, modifier = Modifier.size(56.dp, 48.dp), contentPadding = PaddingValues(0.dp)) {
+        FilledTonalButton(onClick = onPlus, enabled = enabled, colors = stepperColors(), modifier = Modifier.size(56.dp, 48.dp), contentPadding = PaddingValues(0.dp)) {
             Text("+", fontSize = 22.sp)
         }
     }
 }
+
+/**
+ * 加减按钮用中性底色 + 强调色字。
+ * Material 默认的 filledTonal 走 secondaryContainer，在这套配色里是绿色——
+ * 绿色被电量占用了，按钮再用绿会让人以为和电量有关。
+ */
+@Composable
+private fun stepperColors() = ButtonDefaults.filledTonalButtonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    contentColor = MaterialTheme.colorScheme.primary,
+)

@@ -105,14 +105,8 @@ class FloatingWindowService : Service() {
             repository.state.collect { s ->
                 if (s.timestamp == lastTimestamp) return@collect
                 lastTimestamp = s.timestamp
-                val sample = MainViewModel.HistorySample(
-                    speed = s.speed,
-                    power = s.batteryPower ?: s.power,
-                    rpm = s.displayRpm?.toFloat(),
-                    soc = s.soc,
-                    engineRpm = s.engineRpm?.toFloat(),
-                )
-                history.value = (history.value + sample).takeLast(MainViewModel.HISTORY_SIZE)
+                history.value = (history.value + MainViewModel.HistorySample.of(s))
+                    .takeLast(MainViewModel.HISTORY_SIZE)
             }
         }
     }

@@ -11,6 +11,7 @@ import com.dicar.vehicle.data.model.AcWindMode
 import com.dicar.vehicle.data.model.GlassZone
 import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
+import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Zone
 import com.dicar.vehicle.ui.components.AcActions
 import kotlinx.coroutines.Dispatchers
@@ -46,11 +47,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
     data class HistorySample(
         val speed: Float?,
         val power: Float?,
+        /** 主转速（有发动机用发动机，否则用电机），给只画一条转速线的地方用。 */
         val rpm: Float?,
         val soc: Float?,
-        /** 发动机转速单独留一条：混动车只有发动机介入时才有值。 */
+        /** 发动机转速：混动车只有发动机介入时才有值。 */
         val engineRpm: Float?,
-    )
+        /** 电机转速（前后取绝对值大的一侧）。和 [engineRpm] 分开存，
+         *  否则混动车上两条曲线会完全重合——[rpm] 本来就等于发动机转速。 */
+        val motorRpm: Float?,
+    ) {
+        companion object {
+            /** 主界面和悬浮窗各自维护一份曲线缓冲，采样逻辑只在这里写一遍。 */
+            fun of(s: VehicleState) = HistorySample(
+                speed = s.speed,
+                power = s.batteryPower ?: s.power,
+                rpm = s.displayRpm?.toFloat(),
+                soc = s.soc,
+                engineRpm = s.engineRpm?.toFloat(),
+                motorRpm = listOfNotNull(s.motorRpmFront, s.motorRpmRear)
+                    .maxByOrNull { kotlin.math.abs(it) }?.toFloat(),
+            )
+        }
+    }
 
     private val _history = MutableStateFlow<List<HistorySample>>(emptyList())
     val history: StateFlow<List<HistorySample>> = _history.asStateFlow()
@@ -65,14 +83,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
                 // 只按轮询节奏采样；乐观更新（点按空调等）不该在曲线上造出假点
                 if (s.timestamp == lastTimestamp) return@collect
                 lastTimestamp = s.timestamp
-                val sample = HistorySample(
-                    speed = s.speed,
-                    power = s.batteryPower ?: s.power,
-                    rpm = s.displayRpm?.toFloat(),
-                    soc = s.soc,
-                    engineRpm = s.engineRpm?.toFloat(),
-                )
-                _history.update { (it + sample).takeLast(HISTORY_SIZE) }
+                _history.update { (it + HistorySample.of(s)).takeLast(HISTORY_SIZE) }
             }
         }
     }
