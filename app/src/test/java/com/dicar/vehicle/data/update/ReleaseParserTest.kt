@@ -60,6 +60,60 @@ class ReleaseParserTest {
         assertFalse(ReleaseParser.isNewer("v9.9.9", "开发版"))
     }
 
+    // ---------------- 降级通道：从重定向地址取 tag ----------------
+
+    @Test
+    fun `从发布页重定向地址取出 tag`() {
+        assertEquals(
+            "v0.4.0",
+            ReleaseParser.tagFromReleaseUrl("https://github.com/tsix2019/dicar2/releases/tag/v0.4.0"),
+        )
+    }
+
+    @Test
+    fun `tag 后面跟查询串或锚点都要去掉`() {
+        assertEquals("v1.2.3", ReleaseParser.tagFromReleaseUrl(".../releases/tag/v1.2.3?utm=x"))
+        assertEquals("v1.2.3", ReleaseParser.tagFromReleaseUrl(".../releases/tag/v1.2.3#notes"))
+        assertEquals("v1.2.3", ReleaseParser.tagFromReleaseUrl("  .../releases/tag/v1.2.3  "))
+    }
+
+    @Test
+    fun `不是 tag 页的地址一律返回 null`() {
+        // 没有发布过任何版本时 GitHub 会重定向回 releases 列表页，不能把它当成版本号
+        assertNull(ReleaseParser.tagFromReleaseUrl("https://github.com/tsix2019/dicar2/releases"))
+        assertNull(ReleaseParser.tagFromReleaseUrl("https://github.com/login?return_to=%2Fx"))
+        assertNull(ReleaseParser.tagFromReleaseUrl("/releases/tag/"))
+        assertNull(ReleaseParser.tagFromReleaseUrl(null))
+        // tag 里再出现斜杠说明后面还有路径段，不是干净的 tag
+        assertNull(ReleaseParser.tagFromReleaseUrl(".../releases/tag/v1.0/extra"))
+    }
+
+    // ---------------- 错误响应 ----------------
+
+    @Test
+    fun `取出 GitHub 给的错误说明`() {
+        assertEquals(
+            "Not Found",
+            ReleaseParser.errorMessage("""{"message":"Not Found","documentation_url":"https://x"}"""),
+        )
+    }
+
+    @Test
+    fun `限流提示里的公网 IP 要抹掉`() {
+        // 这句话会出现在界面上、进而出现在截图里，没必要把调用方 IP 一起带出去
+        assertEquals(
+            "API rate limit exceeded for ….",
+            ReleaseParser.errorMessage("""{"message":"API rate limit exceeded for 203.0.113.5."}"""),
+        )
+    }
+
+    @Test
+    fun `错误体不是 JSON 或没有 message 时返回 null`() {
+        assertNull(ReleaseParser.errorMessage("<html>403 Forbidden</html>"))
+        assertNull(ReleaseParser.errorMessage("""{"documentation_url":"https://x"}"""))
+        assertNull(ReleaseParser.errorMessage(""))
+    }
+
     // ---------------- JSON ----------------
 
     @Test

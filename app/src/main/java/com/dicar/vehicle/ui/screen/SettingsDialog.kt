@@ -285,6 +285,14 @@ private fun UpdateSection(
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
+            // 走了降级通道时要说明白为什么只有版本号，否则会被当成「这版没写说明」
+            if (release.viaFallback) {
+                Text(
+                    "GitHub 接口这会儿用不了，只从发布页取到了版本号；更新说明和下载请打开发布页查看。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // 不在 App 内直接下载安装：那需要 REQUEST_INSTALL_PACKAGES 权限，
                 // 对一个自用工具来说不值当。跳到发布页用车机浏览器下载即可。

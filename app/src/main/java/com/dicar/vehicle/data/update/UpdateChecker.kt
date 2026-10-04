@@ -6,6 +6,9 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** 一个已发布版本。 */
 data class ReleaseInfo(
@@ -17,6 +20,11 @@ data class ReleaseInfo(
     val apkUrl: String?,
     /** 发布日期 `yyyy-MM-dd`，取不到为 null。 */
     val publishedOn: String?,
+    /**
+     * 是否来自降级通道。接口不可用时只能从网页重定向里拿到版本号，
+     * 没有更新说明也没有下载直链——界面要讲清楚这一点，而不是让人以为这版没写说明。
+     */
+    val viaFallback: Boolean = false,
 )
 
 sealed interface UpdateState {
@@ -37,33 +45,92 @@ sealed interface UpdateState {
 class UpdateChecker(
     private val currentVersion: String,
     private val endpoint: String = LATEST_RELEASE_API,
+    private val fallbackEndpoint: String = LATEST_RELEASE_PAGE,
 ) {
 
     suspend fun check(): UpdateState = withContext(Dispatchers.IO) {
-        val body = try {
-            fetch(endpoint)
+        val release = try {
+            ReleaseParser.parse(fetch(endpoint)) ?: return@withContext fallback("解析发布信息失败")
         } catch (e: IOException) {
-            return@withContext UpdateState.Failed("网络不可达：${e.message ?: "连接失败"}")
+            return@withContext fallback("网络不可达：${e.message ?: "连接失败"}")
         } catch (e: HttpStatus) {
-            return@withContext UpdateState.Failed(e.describe())
+            return@withContext fallback(e.describe())
         }
+        decide(release)
+    }
 
-        val release = ReleaseParser.parse(body)
-            ?: return@withContext UpdateState.Failed("解析发布信息失败")
-
+    private fun decide(release: ReleaseInfo): UpdateState =
         if (ReleaseParser.isNewer(release.version, currentVersion)) {
             UpdateState.Available(release, currentVersion)
         } else {
             UpdateState.UpToDate(currentVersion)
         }
+
+    /**
+     * 接口走不通时的降级通道：直接请网页版的 `/releases/latest`，它会 302 到
+     * `/releases/tag/<版本号>`，从 `Location` 头里就能把版本号抠出来。
+     *
+     * 这条路**不吃 API 的每小时 60 次匿名配额**，所以限流时它照样能用。
+     * 代价是只有版本号，没有更新说明和下载直链。
+     */
+    private fun fallback(reason: String): UpdateState {
+        val tag = runCatching { redirectTag(fallbackEndpoint) }.getOrNull()
+            ?: return UpdateState.Failed(reason)
+        val version = ReleaseParser.stripPrefix(tag)
+        if (!ReleaseParser.isNewer(version, currentVersion)) return UpdateState.UpToDate(currentVersion)
+        return UpdateState.Available(
+            ReleaseInfo(
+                version = version,
+                title = "版本 $version",
+                notes = "",
+                pageUrl = "$RELEASES_PAGE/tag/$tag",
+                apkUrl = null,
+                publishedOn = null,
+                viaFallback = true,
+            ),
+            currentVersion,
+        )
     }
 
-    private class HttpStatus(val code: Int) : Exception() {
-        fun describe(): String = when (code) {
-            403, 429 -> "GitHub 接口限流了，过一会儿再试"
-            404 -> "仓库里还没有发布任何版本"
-            else -> "服务器返回 $code"
+    /** 发一次不跟随重定向的请求，从 `Location` 里取 tag。 */
+    private fun redirectTag(url: String): String? {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = TIMEOUT_MS
+            readTimeout = TIMEOUT_MS
+            // 关键：不能跟随重定向，否则拿不到带版本号的 Location
+            instanceFollowRedirects = false
+            setRequestProperty("User-Agent", "DiCar/$currentVersion")
         }
+        return try {
+            ReleaseParser.tagFromReleaseUrl(conn.getHeaderField("Location"))
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * HTTP 错误。
+     *
+     * 403 有好几种成因，不能一律说成「限流」：只有 `X-RateLimit-Remaining` 确实是 0
+     * 才是配额用完，其余情况把 GitHub 自己给的理由原样带出来，便于判断到底卡在哪。
+     */
+    private class HttpStatus(
+        val code: Int,
+        val rateRemaining: Int?,
+        val rateResetEpoch: Long?,
+        val serverMessage: String?,
+    ) : Exception() {
+        fun describe(): String = when {
+            rateRemaining == 0 -> "GitHub 匿名接口每小时 $ANON_QUOTA 次已用完${resetHint()}"
+            code == 404 -> "仓库里还没有发布任何版本"
+            code == 403 || code == 429 -> "GitHub 拒绝了请求（$code${serverMessage?.let { "：$it" }.orEmpty()}）"
+            else -> "服务器返回 $code${serverMessage?.let { "：$it" }.orEmpty()}"
+        }
+
+        private fun resetHint(): String = rateResetEpoch
+            ?.let { "，${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it * 1000))} 后恢复" }
+            ?: "，过一会儿再试"
     }
 
     private fun fetch(url: String): String {
@@ -78,7 +145,16 @@ class UpdateChecker(
         }
         try {
             val code = conn.responseCode
-            if (code != HttpURLConnection.HTTP_OK) throw HttpStatus(code)
+            if (code != HttpURLConnection.HTTP_OK) {
+                throw HttpStatus(
+                    code = code,
+                    rateRemaining = conn.getHeaderField("X-RateLimit-Remaining")?.toIntOrNull(),
+                    rateResetEpoch = conn.getHeaderField("X-RateLimit-Reset")?.toLongOrNull(),
+                    serverMessage = conn.errorStream
+                        ?.let { stream -> runCatching { stream.bufferedReader().use { it.readText() } }.getOrNull() }
+                        ?.let { ReleaseParser.errorMessage(it) },
+                )
+            }
             return conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()
@@ -89,6 +165,10 @@ class UpdateChecker(
         const val REPO = "tsix2019/dicar2"
         const val LATEST_RELEASE_API = "https://api.github.com/repos/$REPO/releases/latest"
         const val RELEASES_PAGE = "https://github.com/$REPO/releases"
+        /** 网页版同名地址，302 到带版本号的 tag 页，不消耗 API 配额。 */
+        const val LATEST_RELEASE_PAGE = "$RELEASES_PAGE/latest"
+        /** GitHub 对未登录请求按 IP 计的每小时上限。 */
+        const val ANON_QUOTA = 60
         private const val TIMEOUT_MS = 8000
     }
 }
@@ -118,6 +198,30 @@ internal object ReleaseParser {
     }.getOrNull()
 
     fun stripPrefix(raw: String): String = raw.trim().removePrefix("v").removePrefix("V")
+
+    /**
+     * 从 `…/releases/tag/v0.4.0` 这样的地址里取出 tag。
+     * 降级通道靠它：网页版 `/releases/latest` 的 302 `Location` 就长这样。
+     */
+    fun tagFromReleaseUrl(location: String?): String? =
+        location?.trim()?.substringAfter("/releases/tag/", "")
+            ?.substringBefore('?')?.substringBefore('#')
+            ?.takeIf { it.isNotBlank() && '/' !in it }
+
+    /**
+     * 从 GitHub 的错误响应里取 `message`。
+     *
+     * 限流时这句话里带着调用方的公网 IP（「API rate limit exceeded for 1.2.3.4」），
+     * 显示前先抹掉——这条信息会出现在截图里，没必要把 IP 一起带出去。
+     */
+    fun errorMessage(body: String): String? = runCatching {
+        JSONObject(body).optString("message").takeIf { it.isNotBlank() }
+    }.getOrNull()
+        ?.replace(IPV4, "…")
+        ?.take(MAX_SERVER_MESSAGE)
+
+    private val IPV4 = Regex("""\b((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)\b""")
+    private const val MAX_SERVER_MESSAGE = 120
 
     /**
      * 把发布说明里的 Markdown 标记去掉。对话框里就是一个普通 Text，
