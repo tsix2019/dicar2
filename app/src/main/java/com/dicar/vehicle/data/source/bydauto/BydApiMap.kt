@@ -11,7 +11,7 @@ import com.dicar.vehicle.data.model.AcWindMode
  *   里的字段名在车机上反射解析，因为同一功能在不同平台的 fid 数值不同（如 SPEED_AUTO_SPEED）。
  *
  * 来源标记（务必保留，方便判断可信度）：
- *   [D4]  本车 DiLink 4.0（Android 10，2023-11 固件）探测报告中确认存在的方法 / 常量 / FID 符号。
+ *   [D4]  DiLink 4.0（Android 10）探测报告中确认存在的方法 / 常量 / FID 符号。
  *         注意：报告里所有读数都被系统拒绝（permission deny），所以「存在」已确认，「读数含义」仍待验证
  *   [D3]  wheregoes/byd-apps 在 DiLink 3（海豚 / 宋 Pro）实车验证
  *   [D5]  AndyShaman/BYDMate 在 DiLink 5（豹 3）实车验证的 FID 编码
@@ -125,7 +125,7 @@ object BydApiMap {
     val CHARGE_STATE_LABELS = mapOf(
         0 to "未充电", 1 to "充电中", 2 to "充电完成", 3 to "放电中", 4 to "充电终止",
         9 to "预约充电", 11 to "充电超时", 12 to "放电完成", 13 to "充电暂停",
-        15 to "未充电", // 实车停放时返回 15（常量表无定义，视作无充电活动）[D4 实测]
+        15 to "未充电", // 停放状态下实测返回 15（常量表无定义，视作无充电活动）[D4]
     )
 
     val RANGE_ELEC = listOf(getter(Dev.STATISTIC, "getElecDrivingRangeValue") /*[D4] km*/)
