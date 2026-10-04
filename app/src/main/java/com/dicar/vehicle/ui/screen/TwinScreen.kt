@@ -144,14 +144,16 @@ private fun GaugePanel(state: VehicleState, singleRow: Boolean) {
 @Composable
 private fun TrendPanel(state: VehicleState, history: List<MainViewModel.HistorySample>) {
     DataCard(title = "趋势（近 3 分钟）") {
-        HistoryChart(
-            series = listOf(
-                ChartSeries("车速", "km/h", MaterialTheme.colorScheme.primary, history.map { it.speed }),
-                ChartSeries("功率", "kW", MaterialTheme.colorScheme.tertiary, history.map { it.power }, baseline = 0f),
-                ChartSeries("电量", "%", MaterialTheme.colorScheme.secondary, history.map { it.soc }),
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        val series = buildList {
+            add(ChartSeries("车速", "km/h", MaterialTheme.colorScheme.primary, history.map { it.speed }))
+            add(ChartSeries("功率", "kW", MaterialTheme.colorScheme.tertiary, history.map { it.power }, baseline = 0f))
+            add(ChartSeries("电量", "%", MaterialTheme.colorScheme.secondary, history.map { it.soc }))
+            // 发动机介入过才画它的曲线：纯电行驶时这条线没有意义
+            if (history.any { it.engineRpm != null }) {
+                add(ChartSeries("发动机", "rpm", MaterialTheme.colorScheme.error, history.map { it.engineRpm }, baseline = 0f))
+            }
+        }
+        HistoryChart(series = series, modifier = Modifier.fillMaxWidth())
         MetricRow("能量流", state.energyFlow ?: Format.NA)
     }
 }

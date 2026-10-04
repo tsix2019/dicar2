@@ -25,15 +25,12 @@ class VehicleApp : Application() {
 class AppContainer(context: Context) {
     val settings = SettingsStore(context)
     private val adbTransport = AdbTransport(context)
+    private val bydAuto = BydAutoDataSource(context, adbTransport)
     val repository = VehicleRepository(
         settings = settings,
-        sources = listOf(
-            BydAutoDataSource(context, adbTransport),
-            DiPlusDataSource(),
-            MockDataSource(),
-        ),
+        sources = listOf(bydAuto, DiPlusDataSource(), MockDataSource()),
     )
-    val probe = BydAutoProbe(context)
+    val probe = BydAutoProbe(context) { bydAuto.acquireAccess() }
 }
 
 val Context.appContainer: AppContainer

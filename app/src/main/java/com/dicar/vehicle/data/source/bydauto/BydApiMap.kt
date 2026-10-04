@@ -40,7 +40,7 @@ object BydApiMap {
         DOOR_LOCK(1041, "android.hardware.bydauto.doorlock.BYDAutoDoorLockDevice"),
         SAFETY_BELT(1042, "android.hardware.bydauto.safetybelt.BYDAutoSafetyBeltDevice"),
         SENSOR(1043, "android.hardware.bydauto.sensor.BYDAutoSensorDevice"),
-        PM2P5(-1, "android.hardware.bydauto.pm2p5.BYDAutoPM2p5Device"),
+        PM2P5(1008, "android.hardware.bydauto.pm2p5.BYDAutoPM2p5Device"),
     }
 
     sealed interface Src {
@@ -236,14 +236,27 @@ object BydApiMap {
     val SEATBELT_DRIVER = listOf(getter(Dev.SAFETY_BELT, "getSafetyBeltStatus", 1), fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_MAIN_SAFETYBELT_STATE"))
     val SEATBELT_PASSENGER = listOf(getter(Dev.SAFETY_BELT, "getSafetyBeltStatus", 2), fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_DEPUTY_SAFETYBELT_STATE"))
 
-    /** getLightStatus(LIGHT_LEFT_TURN_SIGNAL=4 / LIGHT_RIGHT_TURN_SIGNAL=5)：LIGHT_ON=1 [D4] */
-    val TURN_LEFT = listOf(getter(Dev.LIGHT, "getLightStatus", 4))
-    val TURN_RIGHT = listOf(getter(Dev.LIGHT, "getLightStatus", 5))
+    /**
+     * 副驾乘员检测：getPassengerStatus(SAFETY_BELT_PASSENGER_DEPUTY=1)，
+     * STATE_NOBODY=0 / SOMEBODY=1 [D4]。没人坐时安全带信号本来就会乱跳，
+     * 界面应显示「无人」而不是「未系」。
+     */
+    val PASSENGER_PRESENT = listOf(getter(Dev.SAFETY_BELT, "getPassengerStatus", 1))
 
-    /** 兜底：转向灯位掩码 1 关、2 左、4 右、6 双闪 [D4 符号][D5 编码] */
+    /** 车窗防夹配置 [D4]（BODYWORK_NO_ANTI_PINCH=1 表示无防夹，其余为各种有防夹的配置） */
+    val WINDOW_ANTI_PINCH = listOf(getter(Dev.BODYWORK, "getCarWindowAntiPinchConfig"))
+    const val WINDOW_NO_ANTI_PINCH = 1
+
+    /**
+     * 转向灯用位掩码读：1 关、2 左、4 右、6 双闪 [D4 符号][D5 编码]。
+     *
+     * 不要用 getLightStatus(4/5)：灯光设备里 TURN_LIGHT_OFF = 1（而不是 0），
+     * 按「1 = 开」解读会导致转向灯常亮——这是实车上报的问题。
+     */
     val TURN_SIGNAL_MASK = listOf(fid(Dev.LIGHT, "Light.LIGHT_TURN_SIGNAL_LIGHT"))
     const val TURN_LEFT_BIT = 2
     const val TURN_RIGHT_BIT = 4
+    const val TURN_SIGNAL_MAX = 7
 
     /**
      * 泊车雷达 [D4]：getRadarProbeState(区域) 返回障碍等级（0..6 越小越近，14 表示安全/无障碍）。
@@ -261,6 +274,22 @@ object BydApiMap {
     const val RADAR_MIDDLE_REAR = 9
     fun radar(area: Int) = listOf(getter(Dev.RADAR, "getRadarProbeState", area))
     val RADAR_REVERSE_SWITCH = listOf(getter(Dev.RADAR, "getReverseRadarSwitchState"))
+
+
+    /**
+     * 车窗 / 天窗 / 遮阳帘控制：统一写「目标开度」0..100 [D4 符号][D5 车窗实车验证]。
+     * 比写开关指令好的地方是编码明确（0 关、100 全开），不必猜 OPEN/CLOSE 的枚举值。
+     */
+    val GLASS_SET_FIDS: Map<com.dicar.vehicle.data.model.GlassZone, String> = mapOf(
+        com.dicar.vehicle.data.model.GlassZone.WINDOW_FL to "Bodywork.BODYWORK_LF_WINDOW_TARGET_POSITION_SET",
+        com.dicar.vehicle.data.model.GlassZone.WINDOW_FR to "Bodywork.BODYWORK_RF_WINDOW_TARGET_POSITION_SET",
+        com.dicar.vehicle.data.model.GlassZone.WINDOW_RL to "Bodywork.BODYWORK_LR_WINDOW_TARGET_POSITION_SET",
+        com.dicar.vehicle.data.model.GlassZone.WINDOW_RR to "Bodywork.BODYWORK_RR_WINDOW_TARGET_POSITION_SET",
+        com.dicar.vehicle.data.model.GlassZone.SUNROOF to "Bodywork.BODYWORK_MOON_ROOF_OPEN_PERCENT_SET",
+        com.dicar.vehicle.data.model.GlassZone.SUNSHADE to "Bodywork.BODYWORK_SUNSHADE_PANEL_PERCENT_SET",
+    )
+    const val GLASS_OPEN_PERCENT = 100
+    const val GLASS_CLOSE_PERCENT = 0
 
     // =====================================================================
     // 读：其他

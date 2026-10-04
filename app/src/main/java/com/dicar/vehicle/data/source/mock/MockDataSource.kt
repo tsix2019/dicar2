@@ -91,6 +91,8 @@ class MockDataSource : VehicleDataSource {
             steeringAngle = (15 * sin(t / 2)).toFloat(),
             seatbeltDriver = true,
             seatbeltPassenger = false,
+            passengerPresent = false, // 副驾没人：界面应显示「无人」而不是「未系」
+            windowAntiPinch = true,
             turnLeft = (t.toInt() % 6) < 1,
             turnRight = false,
             totalMileage = 12_345.6f,

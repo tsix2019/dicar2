@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  图标前景：缺口朝下的仪表圆弧 + 车辆剪影，和 App 内的孪生仪表呼应。
+  单色图标（Android 13+ 主题图标）：形状同前景，颜色由系统按壁纸着色。
   108dp 画布，图形落在中间 72dp 安全区内（半径 28 的弧 + 居中的车）。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -12,14 +12,14 @@
     <!-- 仪表底弧（暗） -->
     <path
         android:pathData="M29.8,68 A28,28 0 1 1 78.2,68"
-        android:strokeColor="#4D35C7F2"
+        android:strokeColor="#61000000"
         android:strokeWidth="7"
         android:strokeLineCap="round" />
 
     <!-- 仪表进度弧（亮，约走到 70%） -->
     <path
         android:pathData="M29.8,68 A28,28 0 0 1 75.4,32.2"
-        android:strokeColor="#FF35C7F2"
+        android:strokeColor="#FF000000"
         android:strokeWidth="7"
         android:strokeLineCap="round" />
 
@@ -30,7 +30,7 @@
         android:translateX="34.2"
         android:translateY="37.2">
         <path
-            android:fillColor="#FFFFFFFF"
+            android:fillColor="#FF000000"
             android:pathData="M18.92,6.01C18.72,5.42 18.16,5 17.5,5h-11c-0.66,0 -1.21,0.42 -1.42,1.01L3,12v8c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-1h12v1c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-8l-2.08,-5.99zM6.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,13 6.5,13s1.5,0.67 1.5,1.5S7.33,16 6.5,16zM17.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5s0.67,-1.5 1.5,-1.5 1.5,0.67 1.5,1.5 -0.67,1.5 -1.5,1.5zM5,11l1.5,-4.5h11L19,11L5,11z" />
     </group>
 </vector>

@@ -52,6 +52,12 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
         return active != null
     }
 
+    /**
+     * 当前可用的读写通道，供「探测 BYDAuto 接口」复用——探测工具必须走同一条通道，
+     * 否则在进程内调用会全部 permission deny，报告里看不到任何真实读数。
+     */
+    fun acquireAccess(): BydAccess? = runCatching { acquire() }.getOrNull()
+
     /** 建立/校验通道并记为当前通道；不可用时抛出带原因的异常。 */
     private fun acquire(): BydAccess {
         val a = active ?: pickAccess()?.also { active = it }
@@ -110,6 +116,7 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
     private fun buildState(): VehicleState {
         val m = BydApiMap
         val tempOffset = m.BATTERY_TEMP_OFFSET.toDouble()
+        val turnSignal = int(m.TURN_SIGNAL_MASK, 0, m.TURN_SIGNAL_MAX)
 
         return VehicleState(
             // 动力
@@ -187,8 +194,10 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
             steeringAngle = float(m.STEERING_ANGLE, -900.0, 900.0),
             seatbeltDriver = bool(m.SEATBELT_DRIVER),
             seatbeltPassenger = bool(m.SEATBELT_PASSENGER),
-            turnLeft = bool(m.TURN_LEFT),
-            turnRight = bool(m.TURN_RIGHT),
+            passengerPresent = bool(m.PASSENGER_PRESENT),
+            windowAntiPinch = int(m.WINDOW_ANTI_PINCH, 0, 10)?.let { it != m.WINDOW_NO_ANTI_PINCH },
+            turnLeft = turnSignal?.let { it and m.TURN_LEFT_BIT != 0 },
+            turnRight = turnSignal?.let { it and m.TURN_RIGHT_BIT != 0 },
             radar = Radar(
                 frontLeft = radarLevel(m.radar(m.RADAR_LEFT_FRONT)),
                 frontLeftMid = radarLevel(m.radar(m.RADAR_FRONT_LEFT_MID)),
@@ -290,6 +299,13 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
 
             is VehicleCommand.SeatVent -> seat(command.seat, command.level, m.SEAT_SET_VENT,
                 if (command.seat == Zone.DRIVER) m.SEAT_VENT_DRIVER_SET_FID else m.SEAT_VENT_PASSENGER_SET_FID)
+
+            is VehicleCommand.Glass -> {
+                val symbol = m.GLASS_SET_FIDS[command.zone]
+                    ?: return CommandResult.Unsupported("未配置 ${command.zone.label} 的写入口")
+                val percent = if (command.open) m.GLASS_OPEN_PERCENT else m.GLASS_CLOSE_PERCENT
+                toCommandResult(writeFidSym(Dev.BODYWORK, symbol, null, percent), command.zone.label)
+            }
 
             is VehicleCommand.Quick -> when (command.action) {
                 QuickAction.FRONT_DEFROST -> namedThenFid(

@@ -12,6 +12,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.platform.LocalContext
+import com.dicar.vehicle.data.FloatingBlock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -42,11 +47,16 @@ fun SettingsDialog(
     intervalMs: Long,
     sourceMode: SourceMode,
     probe: ProbeUiState,
+    floatingBlocks: Set<FloatingBlock>,
+    floatingAlpha: Float,
     onIntervalChange: (Long) -> Unit,
     onSourceModeChange: (SourceMode) -> Unit,
+    onToggleFloatingBlock: (FloatingBlock) -> Unit,
+    onFloatingAlphaChange: (Float) -> Unit,
     onRunProbe: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     var sliderValue by remember(intervalMs) { mutableFloatStateOf(intervalMs.toFloat()) }
 
     AlertDialog(
@@ -81,6 +91,45 @@ fun SettingsDialog(
                     valueRange = SettingsStore.MIN_INTERVAL_MS.toFloat()..SettingsStore.MAX_INTERVAL_MS.toFloat(),
                     steps = ((SettingsStore.MAX_INTERVAL_MS - SettingsStore.MIN_INTERVAL_MS) / 100 - 1).toInt(),
                 )
+
+                HorizontalDivider()
+                Text("悬浮窗", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "勾选要显示的内容；透明度越低越不挡视线。改动立即生效。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FloatingBlock.entries.forEach { block ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = block in floatingBlocks, onClick = { onToggleFloatingBlock(block) }),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = block in floatingBlocks, onCheckedChange = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(block.label)
+                    }
+                }
+                var alpha by remember(floatingAlpha) { mutableFloatStateOf(floatingAlpha) }
+                Text("不透明度：${(alpha * 100).roundToLong()}%", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = alpha,
+                    onValueChange = { alpha = it },
+                    onValueChangeFinished = { onFloatingAlphaChange(alpha) },
+                    valueRange = SettingsStore.MIN_FLOATING_ALPHA..1f,
+                )
+
+                HorizontalDivider()
+                Text("关于", style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(PROJECT_URL))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }) { Text("开源地址：$PROJECT_URL") }
 
                 HorizontalDivider()
                 Text("开发工具", style = MaterialTheme.typography.titleSmall)
@@ -130,3 +179,6 @@ fun ProbeResultDialog(probe: ProbeUiState, onDismiss: () -> Unit) {
         },
     )
 }
+
+/** 项目开源地址，设置页里可以直接点开。 */
+const val PROJECT_URL = "https://github.com/tsix2019/dicar2"

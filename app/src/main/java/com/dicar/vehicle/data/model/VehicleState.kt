@@ -66,6 +66,8 @@ data class VehicleState(
     val steeringAngle: Float? = null,           // °，左负右正
     val seatbeltDriver: Boolean? = null,        // true = 已系
     val seatbeltPassenger: Boolean? = null,
+    val passengerPresent: Boolean? = null,      // 副驾乘员检测：没人时安全带信号本来就不可信
+    val windowAntiPinch: Boolean? = null,       // 车窗防夹
     val turnLeft: Boolean? = null,
     val turnRight: Boolean? = null,
     val radar: Radar = Radar(),

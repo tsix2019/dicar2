@@ -38,6 +38,7 @@ fun BodyCard(state: VehicleState, modifier: Modifier = Modifier) {
             "天窗", Format.num(state.sunroofPercent, unit = "%"),
             "遮阳帘", Format.num(state.sunshadePercent, unit = "%"),
         )
+        MetricRow("车窗防夹", Format.onOff(state.windowAntiPinch))
 
         HorizontalDivider()
         MetricRow("方向盘转角", Format.num(state.steeringAngle, 1, "°"))
@@ -46,9 +47,12 @@ fun BodyCard(state: VehicleState, modifier: Modifier = Modifier) {
                 "主驾安全带", seatbelt(state.seatbeltDriver), Modifier.weight(1f),
                 valueColor = if (state.seatbeltDriver == false) warn else Color.Unspecified,
             )
+            // 副驾没人坐时安全带信号本来就不可信，直接显示「无人」
             MetricRow(
-                "副驾安全带", seatbelt(state.seatbeltPassenger), Modifier.weight(1f),
-                valueColor = if (state.seatbeltPassenger == false) warn else Color.Unspecified,
+                "副驾安全带",
+                if (state.passengerPresent == false) "无人" else seatbelt(state.seatbeltPassenger),
+                Modifier.weight(1f),
+                valueColor = if (state.passengerPresent != false && state.seatbeltPassenger == false) warn else Color.Unspecified,
             )
         }
         MetricPair(

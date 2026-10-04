@@ -4,6 +4,7 @@ import com.dicar.vehicle.data.model.AcCycleMode
 import com.dicar.vehicle.data.model.AcWindMode
 import com.dicar.vehicle.data.model.CommandResult
 import com.dicar.vehicle.data.model.DataSourceType
+import com.dicar.vehicle.data.model.GlassZone
 import com.dicar.vehicle.data.model.Openings
 import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
@@ -130,6 +131,16 @@ class DiPlusDataSource(
             is VehicleCommand.AcCycle -> if (command.mode == AcCycleMode.INNER) "内循环" else "外循环"
             is VehicleCommand.SeatHeat -> seatCommand(command.seat, "加热", command.level) ?: return unsupported("3 档（迪加只有 1-2 档）")
             is VehicleCommand.SeatVent -> seatCommand(command.seat, "通风", command.level) ?: return unsupported("3 档（迪加只有 1-2 档）")
+            // 迪加的玻璃指令是「主驾打开100」「天窗打开30」这种中文宏
+            is VehicleCommand.Glass -> when (command.zone) {
+                GlassZone.WINDOW_FL -> "主驾${glassSuffix(command.open)}"
+                GlassZone.WINDOW_FR -> "副驾${glassSuffix(command.open)}"
+                GlassZone.WINDOW_RL -> "左后${glassSuffix(command.open)}"
+                GlassZone.WINDOW_RR -> "右后${glassSuffix(command.open)}"
+                GlassZone.SUNROOF -> "天窗${glassSuffix(command.open)}"
+                GlassZone.SUNSHADE -> "遮阳帘${glassSuffix(command.open)}"
+            }
+
             is VehicleCommand.Quick -> when (command.action) {
                 QuickAction.FRONT_DEFROST -> "吹前挡"
                 QuickAction.QUICK_COOL, QuickAction.PURIFY -> return unsupported(command.action.label)
@@ -152,6 +163,9 @@ class DiPlusDataSource(
             else -> null
         }
     }
+
+    /** 迪加的开合宏：「打开100」=全开、「打开0」=关。 */
+    private fun glassSuffix(open: Boolean) = if (open) "打开100" else "打开0"
 
     private fun unsupported(what: String) = CommandResult.Unsupported("迪加不支持$what")
 

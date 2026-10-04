@@ -23,7 +23,11 @@ import java.util.zip.ZipFile
  *   adb pull /sdcard/Android/data/com.dicar.vehicle/files/probe/
  * 拉回电脑后对照修改 [BydApiMap]。
  */
-class BydAutoProbe(private val context: Context) {
+class BydAutoProbe(
+    private val context: Context,
+    /** 读真实值用的通道（通常是无线调试辅助进程）；为 null 时退回进程内反射。 */
+    private val accessProvider: () -> BydAccess? = { null },
+) {
 
     data class Result(val file: File?, val report: String)
 
@@ -102,12 +106,13 @@ class BydAutoProbe(private val context: Context) {
         // 设备类：实例化后调用无参 getter
         val hasGetInstance = cls.methods.any { it.name == "getInstance" && Modifier.isStatic(it.modifiers) }
         if (hasGetInstance) {
-            val device = BydDevice(context, name)
-            val instance = device.obtain()
-            if (instance == null) {
+            val access = accessProvider()
+            val device = if (access == null) BydDevice(context, name) else null
+            val instance = device?.obtain()
+            if (access == null && instance == null) {
                 sb.appendLine("  [实例] getInstance 失败（权限不足或服务未就绪，见 logcat BydDevice）")
             } else {
-                sb.appendLine("  [当前值]")
+                sb.appendLine("  [当前值]" + if (access != null) "（经${access.label}通道）" else "")
                 cls.methods
                     .filter {
                         !Modifier.isStatic(it.modifiers) && it.parameterTypes.isEmpty() &&
@@ -116,10 +121,18 @@ class BydAutoProbe(private val context: Context) {
                     }
                     .sortedBy { it.name }
                     .forEach { m ->
-                        val value = try {
-                            render(m.invoke(instance))
-                        } catch (e: Throwable) {
-                            "!! ${unwrap(e).javaClass.simpleName}: ${unwrap(e).message}"
+                        val value = if (access != null) {
+                            when (val r = access.readGetter(name, m.name, IntArray(0))) {
+                                is BydDevice.CallResult.Value -> render(r.value)
+                                BydDevice.CallResult.Missing -> "(接口缺失)"
+                                is BydDevice.CallResult.Error -> "!! ${r.error.javaClass.simpleName}: ${r.error.message}"
+                            }
+                        } else {
+                            try {
+                                render(m.invoke(instance))
+                            } catch (e: Throwable) {
+                                "!! ${unwrap(e).javaClass.simpleName}: ${unwrap(e).message}"
+                            }
                         }
                         sb.appendLine("    ${m.name}() = $value")
                     }

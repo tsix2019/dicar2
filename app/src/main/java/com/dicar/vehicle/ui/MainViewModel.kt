@@ -4,9 +4,11 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dicar.vehicle.appContainer
+import com.dicar.vehicle.data.FloatingBlock
 import com.dicar.vehicle.data.SourceMode
 import com.dicar.vehicle.data.model.AcCycleMode
 import com.dicar.vehicle.data.model.AcWindMode
+import com.dicar.vehicle.data.model.GlassZone
 import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
 import com.dicar.vehicle.data.model.Zone
@@ -41,7 +43,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
     val probe: StateFlow<ProbeUiState> = _probe.asStateFlow()
 
     /** 曲线图用的滚动样本（每次轮询追加一条）。 */
-    data class HistorySample(val speed: Float?, val power: Float?, val rpm: Float?, val soc: Float?)
+    data class HistorySample(
+        val speed: Float?,
+        val power: Float?,
+        val rpm: Float?,
+        val soc: Float?,
+        /** 发动机转速单独留一条：混动车只有发动机介入时才有值。 */
+        val engineRpm: Float?,
+    )
 
     private val _history = MutableStateFlow<List<HistorySample>>(emptyList())
     val history: StateFlow<List<HistorySample>> = _history.asStateFlow()
@@ -61,6 +70,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
                     power = s.batteryPower ?: s.power,
                     rpm = s.displayRpm?.toFloat(),
                     soc = s.soc,
+                    engineRpm = s.engineRpm?.toFloat(),
                 )
                 _history.update { (it + sample).takeLast(HISTORY_SIZE) }
             }
@@ -115,11 +125,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
 
     override fun quick(action: QuickAction) = repository.send(VehicleCommand.Quick(action))
 
+    override fun glass(zone: GlassZone, open: Boolean) = repository.send(VehicleCommand.Glass(zone, open))
+
     // ---------------- 设置 ----------------
 
     fun setRefreshInterval(ms: Long) = settings.setRefreshInterval(ms)
 
     fun setSourceMode(mode: SourceMode) = settings.setSourceMode(mode)
+
+    val floatingBlocks = settings.floatingBlocks
+    val floatingAlpha = settings.floatingAlpha
+
+    fun toggleFloatingBlock(block: FloatingBlock) = settings.toggleFloatingBlock(block)
+
+    fun setFloatingAlpha(value: Float) = settings.setFloatingAlpha(value)
 
     fun runProbe() {
         if (_probe.value == ProbeUiState.Running) return

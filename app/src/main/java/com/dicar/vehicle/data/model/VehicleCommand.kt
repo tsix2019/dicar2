@@ -98,6 +98,18 @@ sealed interface VehicleCommand {
         }
     }
 
+    /**
+     * 车窗 / 天窗 / 遮阳帘开关。走「目标开度」写入（0 关、100 全开），
+     * 玻璃行程要几秒，等不到 3 秒的回读窗口，所以不做回读确认，只报「已下发」。
+     */
+    data class Glass(val zone: GlassZone, val open: Boolean) : VehicleCommand {
+        override val key = "glass_$zone"
+        override val label = "${zone.label}${if (open) "打开" else "关闭"}"
+        override val expected: Any? = null
+        override fun readBack(state: VehicleState): Any? = null
+        override fun applyTo(state: VehicleState) = state // 真实开度由轮询反映，不做乐观更新
+    }
+
     /** 一键类功能（净化 / 速冷 / 前除霜）：没有可回读的状态，下发成功即结束。 */
     data class Quick(val action: QuickAction) : VehicleCommand {
         override val key = "quick_$action"
@@ -109,6 +121,12 @@ sealed interface VehicleCommand {
 }
 
 enum class Zone(val label: String) { DRIVER("主驾"), PASSENGER("副驾") }
+
+/** 可开合的玻璃部件。 */
+enum class GlassZone(val label: String) {
+    WINDOW_FL("左前窗"), WINDOW_FR("右前窗"), WINDOW_RL("左后窗"), WINDOW_RR("右后窗"),
+    SUNROOF("天窗"), SUNSHADE("遮阳帘"),
+}
 
 enum class QuickAction(val label: String) {
     PURIFY("一键净化"),

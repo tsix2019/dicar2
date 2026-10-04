@@ -93,7 +93,7 @@ class VehicleRepository(
             VehicleState(error = noSourceMessage(), timestamp = now)
         } else {
             try {
-                source.read().withDerivedValues().copy(source = source.type, timestamp = now)
+                source.read().withDerivedValues().withLatchedSignals().copy(source = source.type, timestamp = now)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -152,6 +152,33 @@ class VehicleRepository(
         active = null
         lastProbeAt = 0L
     }
+
+    // ------------------------------------------------------------------
+    // 闪烁信号的保持：转向灯本身就在闪，1 秒采样会随机采到「灭」的半周期，
+    // 界面就会乱跳。亮过之后保持一小段时间，看起来才像真的在打灯。
+    // ------------------------------------------------------------------
+
+    private class SignalLatch(private val holdMs: Long) {
+        private var lastTrueAt = 0L
+
+        fun apply(raw: Boolean?): Boolean? {
+            val now = SystemClock.elapsedRealtime()
+            if (raw == true) {
+                lastTrueAt = now
+                return true
+            }
+            if (now - lastTrueAt < holdMs) return true
+            return raw
+        }
+    }
+
+    private val turnLeftLatch = SignalLatch(TURN_SIGNAL_HOLD_MS)
+    private val turnRightLatch = SignalLatch(TURN_SIGNAL_HOLD_MS)
+
+    private fun VehicleState.withLatchedSignals() = copy(
+        turnLeft = turnLeftLatch.apply(turnLeft),
+        turnRight = turnRightLatch.apply(turnRight),
+    )
 
     private fun noSourceMessage(): String = when (settings.sourceMode.value) {
         SourceMode.AUTO -> "未检测到 BYDAuto 接口，迪加（127.0.0.1:8988）也无响应"
@@ -287,5 +314,6 @@ class VehicleRepository(
         private const val DEBOUNCE_MS = 350L
         private const val READBACK_DELAY_MS = 400L
         private const val CONFIRM_TIMEOUT_MS = 3_000L
+        private const val TURN_SIGNAL_HOLD_MS = 2_500L
     }
 }

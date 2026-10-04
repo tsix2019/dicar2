@@ -4,6 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dicar.vehicle.data.model.AcCycleMode
 import com.dicar.vehicle.data.model.AcWindMode
+import com.dicar.vehicle.data.model.GlassZone
 import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Zone
@@ -36,6 +42,7 @@ interface AcActions {
     fun cycleSeatHeat(zone: Zone)
     fun cycleSeatVent(zone: Zone)
     fun quick(action: QuickAction)
+    fun glass(zone: GlassZone, open: Boolean)
 }
 
 /** 空调与舒适控制面板：F18-F25 + F38。[pending] 为正在等待回读确认的指令 key。 */
@@ -135,6 +142,18 @@ fun AcPanel(
         }
 
         HorizontalDivider()
+        Label("车窗 / 天窗（车辆会实际动作，注意周围）")
+        GlassRow(GlassZone.WINDOW_FL, state.windowPercent.fl, pending, actions, Modifier.weight(1f)) {
+            GlassRowItem(GlassZone.WINDOW_FR, state.windowPercent.fr, pending, actions)
+        }
+        GlassRow(GlassZone.WINDOW_RL, state.windowPercent.rl, pending, actions, Modifier.weight(1f)) {
+            GlassRowItem(GlassZone.WINDOW_RR, state.windowPercent.rr, pending, actions)
+        }
+        GlassRow(GlassZone.SUNROOF, state.sunroofPercent, pending, actions, Modifier.weight(1f)) {
+            GlassRowItem(GlassZone.SUNSHADE, state.sunshadePercent, pending, actions)
+        }
+
+        HorizontalDivider()
         Label("快捷")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuickAction.entries.forEach { action ->
@@ -165,6 +184,53 @@ private fun SeatButton(label: String, level: Int?, pending: Boolean, modifier: M
             }
         },
     )
+}
+
+/** 一行两个玻璃部件的开关。 */
+@Composable
+private fun GlassRow(
+    zone: GlassZone,
+    percent: Int?,
+    pending: Set<String>,
+    actions: AcActions,
+    modifier: Modifier,
+    second: @Composable RowScope.() -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(modifier) { GlassControl(zone, percent, pending, actions) }
+        second()
+    }
+}
+
+@Composable
+private fun RowScope.GlassRowItem(zone: GlassZone, percent: Int?, pending: Set<String>, actions: AcActions) {
+    Box(Modifier.weight(1f)) { GlassControl(zone, percent, pending, actions) }
+}
+
+@Composable
+private fun GlassControl(zone: GlassZone, percent: Int?, pending: Set<String>, actions: AcActions) {
+    val busy = "glass_$zone" in pending
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(zone.label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                Format.num(percent, unit = "%"),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (busy) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(6.dp))
+        }
+        OutlinedButton(onClick = { actions.glass(zone, true) }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+            Text("开")
+        }
+        Spacer(Modifier.width(6.dp))
+        OutlinedButton(onClick = { actions.glass(zone, false) }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+            Text("关")
+        }
+    }
 }
 
 @Composable
