@@ -59,8 +59,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 首页的两种视图。默认孪生图。 */
-enum class MainTab(val label: String, val glyph: String) { TWIN("孪生", "⬢"), CARDS("卡片", "▦") }
+/** 首页的几种视图。默认孪生图。 */
+enum class MainTab(val label: String, val glyph: String) {
+    TWIN("孪生", "⬢"),
+    CARDS("卡片", "▦"),
+    HARDWARE("硬件", "▣"),
+}
 
 @Composable
 fun DashboardScreen(viewModel: MainViewModel) {
@@ -129,6 +133,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                     when (tab) {
                         MainTab.TWIN -> TwinPane(state, history, Modifier.fillMaxSize(), use3d = twin3d)
                         MainTab.CARDS -> CardsPane(state, pending, viewModel)
+                        MainTab.HARDWARE -> HardwareScreen(viewModel, Modifier.fillMaxSize())
                     }
                 }
             }

@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import com.dicar.vehicle.data.SettingsStore
 import com.dicar.vehicle.data.VehicleRepository
+import com.dicar.vehicle.data.hardware.HardwareInspector
+import com.dicar.vehicle.data.hardware.HardwareMonitor
 import com.dicar.vehicle.data.source.bydauto.BydAutoDataSource
 import com.dicar.vehicle.data.source.bydauto.BydAutoProbe
 import com.dicar.vehicle.data.source.bydauto.adb.AdbTransport
@@ -33,6 +35,9 @@ class AppContainer(context: Context) {
     )
     val probe = BydAutoProbe(context) { bydAuto.acquireAccess() }
     val updateChecker = UpdateChecker(currentVersion = BuildConfig.VERSION_NAME)
+    val hardwareInspector = HardwareInspector(context)
+    // 有状态（要靠前后两次 /proc/stat 求差算占用率），所以全局只能有一个
+    val hardwareMonitor = HardwareMonitor(context)
 }
 
 val Context.appContainer: AppContainer

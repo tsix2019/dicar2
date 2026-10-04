@@ -14,6 +14,15 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!--
+      硬件信息页用。三个都是 normal 级，安装时自动授予，不会弹窗。
+      刻意**不申请**定位权限：Wi-Fi 名称和 BSSID 从 8.1 起要定位才能读，
+      为一行展示信息去要定位不划算，那两项就不显示了。
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+
+    <!--
       BYDAuto 权限。_GET/_SET 是签名级，第三方 App 拿不到，实际靠 BydPermissionContext 在进程内放行；
       _COMMON 是运行时权限，可选地用 adb 授予（见 README）。车机上不存在的权限声明会被系统忽略。
     -->

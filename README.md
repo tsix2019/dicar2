@@ -17,6 +17,10 @@
 「检查更新」会向 GitHub 发一次匿名请求比对版本号，默认仅在你手动点击时发生
 （设置里可以打开「启动时自动检查」）。请求不携带任何车辆数据或设备标识。
 
+「硬件信息」页读到的东西同样只留在本机。导出的文本**默认会把序列号、MAC、IP、
+Android ID 这类能定位到这台车机的字段打码**，需要完整内容可以在导出弹窗里关掉开关。
+这一页也刻意不申请定位权限，代价是 Wi-Fi 名称和 BSSID 读不到（安卓 8.1 起它们归定位管）。
+
 > ⚠️ 个人项目，与比亚迪官方无关。接口全部来自公开逆向资料，不同车型/固件差异很大，
 > 请自行评估风险。控制类功能（车窗、天窗、空调）会让车辆真实动作。
 
@@ -30,6 +34,7 @@
 | **控制** | 空调开关 / 温度 / 风量 / 出风模式 / 循环、座椅加热通风、四门车窗、天窗、遮阳帘、前挡除霜 |
 | **悬浮窗** | 浮在其他应用之上，内容（主读数 / 仪表 / 曲线 / 孪生图 / 明细）可自由勾选，透明度可调，可拖动 |
 | **前台服务** | 后台持续采集，通知栏常驻「车速 \| SOC \| 空调」 |
+| **硬件信息** | 车机**自身**的完整硬件清单：SoC 与大小核分簇、每核实时频率与占用、GPU 能力与扩展、内存/存储/分区、屏幕与多屏、传感器、摄像头、网络、音频、编解码器与 DRM，以及全量系统属性（常有上千条）。支持搜索和分类过滤，可导出为文本 |
 | **检查更新** | 对比 GitHub 上的最新发布版本，可跳转发布页或直接下载 APK。默认手动触发；「启动时自动检查」是可选开关 |
 | **接口探测** | 一键导出车机上全部 `android.hardware.bydauto.*` 的类、常量、方法与当前读数，用于适配新车型 |
 
@@ -38,6 +43,8 @@
   <img src="docs/images/twin-light.png" width="48%" alt="浅色模式">
   <br>
   <img src="docs/images/twin-3d.png" width="48%" alt="3D 车辆模型">
+  <img src="docs/images/hardware.png" width="48%" alt="硬件信息">
+  <br>
   <img src="docs/images/floating.png" width="32%" alt="悬浮窗">
 </p>
 
@@ -120,6 +127,12 @@ external network request: the update check asks GitHub for the latest release ta
 that only happens when you tap "check for updates" (an opt-in "check on launch" toggle exists in
 settings). The request carries no vehicle data and no device identifier.
 
+Everything the hardware page reads also stays on the device. Exported reports **redact serial
+numbers, MAC addresses, IPs, the Android ID and similar device-identifying fields by default** —
+there is a switch in the export dialog if you need them. That page also deliberately avoids
+requesting location permission, at the cost of not being able to show the Wi-Fi SSID or BSSID
+(Android has gated those behind location since 8.1).
+
 > ⚠️ Personal project, not affiliated with BYD. All interfaces come from public
 > reverse-engineering work and vary a lot across models and firmware — use at your own risk.
 > Control features (windows, sunroof, climate) physically actuate the car.
@@ -134,6 +147,7 @@ settings). The request carries no vehicle data and no device identifier.
 | **Controls** | A/C power, temperature, fan, vent mode, recirculation, seat heating/ventilation, all four windows, sunroof, sunshade, windshield defrost |
 | **Floating overlay** | Floats above other apps; which blocks to show (readout / gauges / chart / twin view / details) and the opacity are configurable, and it is draggable |
 | **Foreground service** | Keeps polling in the background with a persistent "speed \| SoC \| A/C" notification |
+| **Hardware info** | A full inventory of the head unit **itself**: SoC and big.LITTLE clusters, live per-core frequency and load, GPU limits and extensions, RAM/storage/partitions, displays, sensors, cameras, radios, audio, codecs and DRM, plus every system property (often well over a thousand). Searchable, filterable by category, and exportable as text |
 | **Update check** | Compares against the latest GitHub release; opens the release page or the APK directly. Manual by default; "check on launch" is opt-in |
 | **Interface probe** | One tap dumps every `android.hardware.bydauto.*` class, constant, method and current value from the head unit — the basis for porting to other models |
 

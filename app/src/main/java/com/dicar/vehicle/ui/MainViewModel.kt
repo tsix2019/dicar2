@@ -13,12 +13,18 @@ import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Zone
+import com.dicar.vehicle.data.hardware.HardwareMonitor
+import com.dicar.vehicle.data.hardware.HwSection
+import com.dicar.vehicle.data.hardware.LiveStats
 import com.dicar.vehicle.data.update.UpdateState
 import com.dicar.vehicle.ui.components.AcActions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,6 +33,11 @@ sealed interface ProbeUiState {
     data object Idle : ProbeUiState
     data object Running : ProbeUiState
     data class Done(val filePath: String?, val report: String) : ProbeUiState
+}
+
+sealed interface HardwareExportState {
+    data object Idle : HardwareExportState
+    data class Done(val filePath: String?, val text: String, val redact: Boolean) : HardwareExportState
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
@@ -183,6 +194,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
     fun toggleFloatingBlock(block: FloatingBlock) = settings.toggleFloatingBlock(block)
 
     fun setFloatingAlpha(value: Float) = settings.setFloatingAlpha(value)
+
+    // ---------------- 硬件信息 ----------------
+
+    private val _hardware = MutableStateFlow<List<HwSection>>(emptyList())
+    val hardware: StateFlow<List<HwSection>> = _hardware.asStateFlow()
+
+    private val _hardwareLoading = MutableStateFlow(false)
+    val hardwareLoading: StateFlow<Boolean> = _hardwareLoading.asStateFlow()
+
+    private val _hardwareExport = MutableStateFlow<HardwareExportState>(HardwareExportState.Idle)
+    val hardwareExport: StateFlow<HardwareExportState> = _hardwareExport.asStateFlow()
+
+    /** 「隐去标识符」开关对应的那一份原始数据，切换开关时要用它重新渲染。 */
+    private var lastExported: List<HwSection> = emptyList()
+
+    /**
+     * 每秒一帧的实时指标。
+     *
+     * 故意做成冷流：只有硬件页在前台订阅时才采样，离开页面立刻停。
+     * 这些读数要遍历 /sys 下几十个节点，不值得为了没人看的页面一直跑。
+     */
+    fun liveStats(): Flow<LiveStats> = flow {
+        while (true) {
+            emit(withContext(Dispatchers.IO) { container.hardwareMonitor.sample() })
+            delay(HardwareMonitor.SAMPLE_INTERVAL_MS)
+        }
+    }
+
+    /** 静态信息只采一次，[force] 为 true 时重采（比如插了 U 盘之后）。 */
+    fun loadHardware(force: Boolean = false) {
+        if (_hardwareLoading.value) return
+        if (!force && _hardware.value.isNotEmpty()) return
+        _hardwareLoading.value = true
+        viewModelScope.launch {
+            _hardware.value = withContext(Dispatchers.IO) { container.hardwareInspector.collectStatic() }
+            _hardwareLoading.value = false
+        }
+    }
+
+    fun exportHardware(sections: List<HwSection>) {
+        if (sections.isEmpty()) return
+        lastExported = sections
+        writeExport(redact = true)
+    }
+
+    fun setExportRedact(redact: Boolean) = writeExport(redact)
+
+    private fun writeExport(redact: Boolean) {
+        val sections = lastExported.ifEmpty { return }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                container.hardwareInspector.export(sections, redact)
+            }
+            _hardwareExport.value = HardwareExportState.Done(result.file?.absolutePath, result.text, redact)
+        }
+    }
+
+    fun dismissHardwareExport() {
+        _hardwareExport.value = HardwareExportState.Idle
+    }
 
     fun runProbe() {
         if (_probe.value == ProbeUiState.Running) return
