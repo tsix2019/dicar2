@@ -82,8 +82,10 @@ class MockDataSource : VehicleDataSource {
             voltage12V = 13.8f,
             insideTemp = 24.5f,
             outsideTemp = 31.0f,
-            doors = Openings(fl = false, fr = false, rl = false, rr = false, hood = false, trunk = false),
-            windowPercent = Wheels(0, 0, 0, 0),
+            // 车身开合按固定周期轮着来。原来这里全写死 false/0，结果开门动画、
+            // 车窗升降这些联动在无车调试时一次都跑不到，等于没被验收过。
+            doors = bodyCycle(t),
+            windowPercent = windowCycle(t),
             sunroofPercent = 0,
             sunshadePercent = 40,
             tirePressure = Wheels(250f, 252f, 248f, 249f),
@@ -115,5 +117,31 @@ class MockDataSource : VehicleDataSource {
         }
         ac = command.applyTo(ac)
         return CommandResult.Sent
+    }
+
+    /**
+     * 车门/两盖的演示循环：每 [BODY_PERIOD] 秒走一轮，依次打开四门、引擎盖、后备箱，
+     * 最后全关。目的是让无车调试也能看到孪生图上的开合动画，而不是永远一台闭合的车。
+     */
+    private fun bodyCycle(t: Double): Openings {
+        val phase = ((t % BODY_PERIOD) / BODY_PERIOD * 7).toInt()
+        return Openings(
+            fl = phase == 1,
+            fr = phase == 2,
+            rl = phase == 3,
+            rr = phase == 3,
+            hood = phase == 4,
+            trunk = phase == 5,
+        )
+    }
+
+    /** 车窗演示：左前窗缓慢升降，其余三个各停在一个固定开度。 */
+    private fun windowCycle(t: Double): Wheels<Int> {
+        val wave = ((1 - kotlin.math.cos(t / 7)) / 2 * 100).toInt().coerceIn(0, 100)
+        return Wheels(fl = wave, fr = 0, rl = 35, rr = 0)
+    }
+
+    private companion object {
+        const val BODY_PERIOD = 28.0
     }
 }

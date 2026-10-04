@@ -73,6 +73,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val floatingOn by FloatingWindowService.isRunning.collectAsStateWithLifecycle()
     val floatingBlocks by viewModel.floatingBlocks.collectAsStateWithLifecycle()
     val floatingAlpha by viewModel.floatingAlpha.collectAsStateWithLifecycle()
+    val twin3d by viewModel.twin3dEnabled.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -124,7 +125,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                     )
                     state.error?.let { ErrorBanner(it) }
                     when (tab) {
-                        MainTab.TWIN -> TwinPane(state, history, Modifier.fillMaxSize())
+                        MainTab.TWIN -> TwinPane(state, history, Modifier.fillMaxSize(), use3d = twin3d)
                         MainTab.CARDS -> CardsPane(state, pending, viewModel)
                     }
                 }
@@ -137,10 +138,12 @@ fun DashboardScreen(viewModel: MainViewModel) {
             intervalMs = intervalMs,
             sourceMode = sourceMode,
             probe = probe,
+            twin3dEnabled = twin3d,
             floatingBlocks = floatingBlocks,
             floatingAlpha = floatingAlpha,
             onIntervalChange = viewModel::setRefreshInterval,
             onSourceModeChange = viewModel::setSourceMode,
+            onTwin3dChange = viewModel::setTwin3dEnabled,
             onToggleFloatingBlock = viewModel::toggleFloatingBlock,
             onFloatingAlphaChange = viewModel::setFloatingAlpha,
             onRunProbe = viewModel::runProbe,

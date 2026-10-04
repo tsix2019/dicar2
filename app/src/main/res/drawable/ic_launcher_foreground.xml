@@ -9,16 +9,26 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!--
+      两条弧共用一个圆：圆心 (54,54)、半径 28，从 150° 起顺时针扫 240°（缺口朝下），
+      和 App 内 ArcGauge 的 START/SWEEP 一致。端点由 (54+28cosθ, 54+28sinθ) 算出：
+        θ=150°  → (29.751, 68.000)   起点
+        θ=318°  → (74.808, 35.264)   70% 处
+        θ=390°  → (78.249, 68.000)   终点
+      端点必须落在这个圆上。否则弦长一旦超过 2r，SVG 会把半径放大并把圆心挪到弦中点，
+      两条弧就变成两个不同心的圆——之前亮弧用 (75.4,32.2) 正是栽在这里。
+    -->
+
     <!-- 仪表底弧（暗） -->
     <path
-        android:pathData="M29.8,68 A28,28 0 1 1 78.2,68"
+        android:pathData="M29.751,68 A28,28 0 1 1 78.249,68"
         android:strokeColor="#4D35C7F2"
         android:strokeWidth="7"
         android:strokeLineCap="round" />
 
-    <!-- 仪表进度弧（亮，约走到 70%） -->
+    <!-- 仪表进度弧（亮，走到 70%） -->
     <path
-        android:pathData="M29.8,68 A28,28 0 0 1 75.4,32.2"
+        android:pathData="M29.751,68 A28,28 0 0 1 74.808,35.264"
         android:strokeColor="#FF35C7F2"
         android:strokeWidth="7"
         android:strokeLineCap="round" />

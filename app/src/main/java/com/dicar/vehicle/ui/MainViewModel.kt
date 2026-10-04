@@ -144,6 +144,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
 
     fun setSourceMode(mode: SourceMode) = settings.setSourceMode(mode)
 
+    val twin3dEnabled = settings.twin3dEnabled
+
+    fun setTwin3dEnabled(enabled: Boolean) = settings.setTwin3dEnabled(enabled)
+
     val floatingBlocks = settings.floatingBlocks
     val floatingAlpha = settings.floatingAlpha
 

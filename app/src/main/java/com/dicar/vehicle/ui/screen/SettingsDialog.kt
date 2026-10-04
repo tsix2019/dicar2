@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,10 +48,12 @@ fun SettingsDialog(
     intervalMs: Long,
     sourceMode: SourceMode,
     probe: ProbeUiState,
+    twin3dEnabled: Boolean,
     floatingBlocks: Set<FloatingBlock>,
     floatingAlpha: Float,
     onIntervalChange: (Long) -> Unit,
     onSourceModeChange: (SourceMode) -> Unit,
+    onTwin3dChange: (Boolean) -> Unit,
     onToggleFloatingBlock: (FloatingBlock) -> Unit,
     onFloatingAlphaChange: (Float) -> Unit,
     onRunProbe: () -> Unit,
@@ -91,6 +94,27 @@ fun SettingsDialog(
                     valueRange = SettingsStore.MIN_INTERVAL_MS.toFloat()..SettingsStore.MAX_INTERVAL_MS.toFloat(),
                     steps = ((SettingsStore.MAX_INTERVAL_MS - SettingsStore.MIN_INTERVAL_MS) / 100 - 1).toInt(),
                 )
+
+                HorizontalDivider()
+                Text("孪生图", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(selected = twin3dEnabled, onClick = { onTwin3dChange(!twin3dEnabled) }),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("3D 车辆模型")
+                        Text(
+                            "可拖动旋转、双指缩放。会持续占用 GPU，车机上和导航同时开可能卡顿；" +
+                                "关闭则使用 2D 俯视图（默认）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(checked = twin3dEnabled, onCheckedChange = null)
+                }
 
                 HorizontalDivider()
                 Text("悬浮窗", style = MaterialTheme.typography.titleSmall)

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.ui.MainViewModel
+import com.dicar.vehicle.ui.components.Car3dView
 import com.dicar.vehicle.ui.components.CarDiagram
 import com.dicar.vehicle.ui.components.ChartCanvas
 import com.dicar.vehicle.ui.components.ChartLegend
@@ -46,6 +47,7 @@ fun TwinPane(
     state: VehicleState,
     history: List<MainViewModel.HistorySample>,
     modifier: Modifier = Modifier,
+    use3d: Boolean = false,
 ) {
     BoxWithConstraints(modifier) {
         val wide = maxWidth > 720.dp
@@ -56,7 +58,7 @@ fun TwinPane(
             ) {
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     RpmCard(state, Modifier.weight(1f).fillMaxHeight())
-                    SpeedAndCar(state, Modifier.weight(1.25f).fillMaxHeight())
+                    SpeedAndCar(state, use3d, Modifier.weight(1.25f).fillMaxHeight())
                     PowerCardPane(state, Modifier.weight(1f).fillMaxHeight())
                 }
                 TrendStrip(state, history)
@@ -71,7 +73,7 @@ fun TwinPane(
             ) {
                 // 窄屏给车辆图一个固定高度：按宽高比算的话，600dp 宽的屏上车会撑到
                 // 700dp 高，一屏只剩一台车
-                SpeedAndCar(state, Modifier.fillMaxWidth().height(380.dp))
+                SpeedAndCar(state, use3d, Modifier.fillMaxWidth().height(380.dp))
                 RpmCard(state, Modifier.fillMaxWidth().height(260.dp))
                 PowerCardPane(state, Modifier.fillMaxWidth())
                 TrendStrip(state, history)
@@ -101,13 +103,14 @@ private fun RpmCard(state: VehicleState, modifier: Modifier = Modifier) {
     }
 }
 
-/** 中栏：大号车速 + 俯视车况图，不套卡片。 */
+/** 中栏：大号车速 + 车况图，不套卡片。[use3d] 决定用 3D 车模还是 2D 俯视图。 */
 @Composable
-private fun SpeedAndCar(state: VehicleState, modifier: Modifier = Modifier) {
+private fun SpeedAndCar(state: VehicleState, use3d: Boolean, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         HeroNumber(state.speed, "km/h", size = 64.sp)
         Spacer(Modifier.height(4.dp))
-        CarDiagram(state, Modifier.fillMaxWidth().weight(1f))
+        val carModifier = Modifier.fillMaxWidth().weight(1f)
+        if (use3d) Car3dView(state, carModifier) else CarDiagram(state, carModifier)
     }
 }
 

@@ -50,6 +50,20 @@ class SettingsStore(context: Context) {
         prefs.edit { putString(KEY_SOURCE, mode.name) }
     }
 
+    // ---------------- 孪生图 ----------------
+
+    /**
+     * 孪生主页是否用 3D 车辆。默认**关**：3D 会让 GLSurfaceView 持续按屏幕刷新率重绘，
+     * 车机 GPU 本来就弱，和导航同时开时不值得。关掉就是纯 Canvas 的 2D 俯视图。
+     */
+    private val _twin3dEnabled = MutableStateFlow(prefs.getBoolean(KEY_TWIN_3D, false))
+    val twin3dEnabled: StateFlow<Boolean> = _twin3dEnabled.asStateFlow()
+
+    fun setTwin3dEnabled(enabled: Boolean) {
+        _twin3dEnabled.value = enabled
+        prefs.edit { putBoolean(KEY_TWIN_3D, enabled) }
+    }
+
     // ---------------- 悬浮窗 ----------------
 
     private val _floatingBlocks = MutableStateFlow(
@@ -92,5 +106,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SOURCE = "source_mode"
         private const val KEY_FLOAT_BLOCKS = "floating_blocks"
         private const val KEY_FLOAT_ALPHA = "floating_alpha"
+        private const val KEY_TWIN_3D = "twin_3d_enabled"
     }
 }
