@@ -32,8 +32,8 @@ android {
         minSdk = 28
         // 需求文档要求 targetSdk 33：避免车机上因新版本行为限制导致安装/前台服务问题
         targetSdk = 33
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     signingConfigs {
