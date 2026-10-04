@@ -59,6 +59,9 @@ app/src/main/java/com/dicar/vehicle/
 ├── VehicleApp.kt                 Application + 手动依赖注入（AppContainer）
 ├── MainActivity.kt               单 Activity，申请通知权限并启动前台服务
 ├── service/VehicleMonitorService.kt   前台服务：持有轮询、刷新通知（限流 2s）
+├── helper/                       辅助进程（app_process 以调试身份运行，最小依赖）
+│   ├── HelperMain.kt                 入口：拿系统 Context，按行协议读写 BYDAutoDeviceManager
+│   └── HelperReflect.kt              辅助进程内的反射封装
 ├── data/
 │   ├── model/VehicleState.kt     全量状态（全部可空 → N/A）+ 推算字段（压差/电池功率/瞬时电耗/能量流）
 │   ├── model/VehicleCommand.kt   控制指令：防抖 key、乐观更新、回读期望值
@@ -68,12 +71,14 @@ app/src/main/java/com/dicar/vehicle/
 │       ├── VehicleDataSource.kt  数据源接口
 │       ├── bydauto/              主数据源：反射调用 android.hardware.bydauto.*
 │       │   ├── BydApiMap.kt          ★ 接口映射表（上车后主要改这里）
-│       │   ├── BydAutoDataSource.kt  按表读取 → 换算 → 范围校验；控制下发
+│       │   ├── BydAutoDataSource.kt  按表读取 → 换算 → 范围校验；控制下发；自动选通道
+│       │   ├── BydAccess.kt          读写通道抽象 + 进程内 / 无线调试两种实现
 │       │   ├── BydDevice.kt          单个设备的反射包装（缓存 Method、错误只记一次日志）
 │       │   ├── BydFeatureIds.kt      FID 符号 → 本车数值（运行时解析 BYDAutoFeatureIds）
 │       │   ├── BydPermissionContext.kt  进程内放行 BYDAUTO_* 权限检查
 │       │   ├── BydAutoProbe.kt       接口探测工具
-│       │   └── DexTypeScanner.kt     最小 dex 解析（找 bydauto 类）
+│       │   ├── DexTypeScanner.kt     最小 dex 解析（找 bydauto 类）
+│       │   └── adb/                  内置 ADB 客户端（dadb）+ 辅助进程会话/行协议
 │       ├── diplus/DiPlusDataSource.kt  备用数据源：迪加 HTTP 127.0.0.1:8988
 │       └── mock/MockDataSource.kt      模拟数据（无车调 UI）
 ├── ui/  MainViewModel + Compose 界面（动力 / 电池 / 空调 / 车身 / 其他 五张卡片，自适应列数）
@@ -82,12 +87,24 @@ app/src/main/java/com/dicar/vehicle/
 
 ### 数据源
 
-- **BYDAuto**：`getInstance(Context)` 时传入 `BydPermissionContext`，在本进程内放行签名级的 `BYDAUTO_*_GET/SET` 权限检查（DiLink 3 实测有效）。
-  每个字段先试命名 getter（如 `BYDAutoSpeedDevice.getCurrentSpeed()`），失败再走通用 `get(dev, fid)`。
-  FID 数值因平台而异，所以按 `BYDAutoFeatureIds` 里的符号名在运行时解析。
+- **BYDAuto**：两条通道自动择一（见 `BydAccess`）——
+  - **无线调试通道**（`AdbBydAccess`，车机实际走这条）：App 用内置 ADB 客户端（dadb）连车机本机 `127.0.0.1:5555`，
+    以调试身份启动辅助进程 `HelperMain`（`app_process`），由它调 `BYDAutoDeviceManager` 读写。
+    DiLink 4.0 的 `BYDAUTO_*_GET/SET` 是签名级权限，App 自身进程调用会被车机服务端拒绝（`permission deny`），
+    只有调试身份（shell）能通过。**首次连接车机会弹「允许调试」，勾一律允许即可。**
+  - **进程内通道**（`InProcessBydAccess`）：App 直接反射。少数权限宽松的车型可用；被拒时自动改走上面的无线调试通道。
+  - 每个字段先试命名 getter（如 `BYDAutoSpeedDevice.getCurrentSpeed()`），失败再按 `BYDAutoFeatureIds`
+    符号解析出 FID 走 `getInt/getDouble`。FID 符号→数值在 App 进程内解析（读常量不需要权限）。
 - **迪加**：`/api/getDiPars?text=别名:{中文参数名}|…` 一次读全部参数；控制用 `/api/sendCmd?cmd=迪加<指令>`。
   sendCmd 对无效指令也返回成功，所以只能靠回读确认。
 - **模拟**：行驶数据随时间变化；空调状态可被控制，副驾通风和一键净化故意返回「不支持」，用来验证提示链路。
+
+### 启用 BYDAuto（车机首次）
+
+1. 车机开启无线 ADB（见 §2）。
+2. App 选「自动」或「仅 BYDAuto」。首次会读到本机调试口 → 车机弹「是否允许 USB/无线调试」，勾**一律允许**并确定。
+3. 之后 App 会自动起辅助进程读数；授权只需一次（密钥存在 App 私有目录）。
+4. 若仍全 N/A：`adb logcat -s AdbTransport HelperSession BydAutoDataSource` 看连接/辅助进程日志。
 
 ### 控制链路
 

@@ -7,14 +7,14 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * 单个 BYDAuto 设备（如 BYDAutoAcDevice）的反射包装。
+ * 单个 BYDAuto 类（设备类或 BYDAutoDeviceManager）的反射包装。
  *
- * - 类与实例懒加载，失败后不再重试（同一进程内结果不会变）；
+ * - 类与实例懒加载，失败后不再重试（同一进程内结果不会变），失败原因保存在 [initError]；
  * - Method 按「方法名 + 参数个数」缓存，查不到记为缺失；
  * - 调用失败只打一次日志，返回 [CallResult.Missing] / [CallResult.Error]，绝不抛给上层。
  *
  * BYDAuto 的 getter/setter 参数几乎都是 int（区域、位置、档位），所以这里统一用 Int 传参，
- * 遇到 double/float/boolean/long 形参时自动转换。
+ * 只匹配形参全是数值/布尔类型的重载（避免误调 get(int[], Class) 这类同名方法）。
  */
 class BydDevice(private val context: Context, val className: String) {
 
@@ -29,9 +29,13 @@ class BydDevice(private val context: Context, val className: String) {
     private val methodCache = HashMap<String, Method?>()
     private val reported = HashSet<String>()
 
+    /** getInstance 失败的原因（类不存在时为 null）。 */
+    var initError: Throwable? = null
+        private set
+
     val isAvailable: Boolean get() = obtain() != null
 
-    /** 获取设备单例：优先 getInstance(Context)，其次 getInstance()。 */
+    /** 获取单例：优先 getInstance(Context)，其次 getInstance()。 */
     @Synchronized
     fun obtain(): Any? {
         if (loaded) return instance
@@ -53,7 +57,8 @@ class BydDevice(private val context: Context, val className: String) {
         } catch (e: ClassNotFoundException) {
             null // 非比亚迪系统 / 该车型没有这个设备：正常情况，不打堆栈
         } catch (e: Throwable) {
-            Log.w(TAG, "getInstance failed: $className", unwrap(e))
+            initError = unwrap(e)
+            Log.w(TAG, "getInstance failed: $className", initError)
             null
         }
         if (instance == null) Log.i(TAG, "device unavailable: $className")
@@ -77,52 +82,7 @@ class BydDevice(private val context: Context, val className: String) {
         }
     }
 
-    /** getter 简写：缺失或出错都返回 null，交给 ValueSanitizer 继续清洗。 */
-    fun get(method: String, vararg args: Int): Any? =
-        (call(method, *args) as? CallResult.Value)?.value
-
-    /**
-     * 直接调用设备内部的 mDeviceManager（BYDAutoManager），用于读 float 型 FID：
-     * AbsBYDAutoDevice 只暴露了 int 版的 get(dev, fid)，getDouble 只在 manager 上有。
-     */
-    fun managerGet(method: String, vararg args: Int): Any? {
-        val target = obtain() ?: return null
-        val manager = deviceManager(target) ?: return null
-        val m = findMethod(manager.javaClass, method, args.size) ?: run {
-            logOnce("missing:manager.$method") { "manager method not found: $method(${args.size} args)" }
-            return null
-        }
-        return try {
-            m.invoke(manager, *convertArgs(m, args))
-        } catch (e: Throwable) {
-            logOnce("error:manager.$method") { "manager call failed: $method -> ${unwrap(e)}" }
-            null
-        }
-    }
-
-    private var manager: Any? = null
-    private var managerResolved = false
-
-    private fun deviceManager(target: Any): Any? {
-        if (managerResolved) return manager
-        managerResolved = true
-        var cls: Class<*>? = target.javaClass
-        while (cls != null) {
-            val current = cls
-            val found = runCatching {
-                current.getDeclaredField("mDeviceManager").apply { isAccessible = true }.get(target)
-            }.getOrNull()
-            if (found != null) {
-                manager = found
-                break
-            }
-            cls = current.superclass
-        }
-        if (manager == null) Log.w(TAG, "mDeviceManager not found on ${shortName()}")
-        return manager
-    }
-
-    /** 读设备类上的 public static 常量（如区域编号），读不到返回 null。 */
+    /** 读类上的 public static 常量（如区域编号），读不到返回 null。 */
     fun constant(name: String): Int? = try {
         (Class.forName(className).getField(name).get(null) as? Number)?.toInt()
     } catch (e: Throwable) {
@@ -133,7 +93,7 @@ class BydDevice(private val context: Context, val className: String) {
         val key = "$name/$argCount"
         if (methodCache.containsKey(key)) return methodCache[key]
         val found = cls.methods
-            .filter { it.name == name && it.parameterTypes.size == argCount }
+            .filter { m -> m.name == name && m.parameterTypes.size == argCount && m.parameterTypes.all { it in INT_CONVERTIBLE } }
             // 有重载时优先全 int 形参的版本
             .sortedByDescending { m -> m.parameterTypes.count { it == Int::class.javaPrimitiveType } }
             .firstOrNull()
@@ -144,13 +104,12 @@ class BydDevice(private val context: Context, val className: String) {
     private fun convertArgs(m: Method, args: IntArray): Array<Any> =
         Array(args.size) { i ->
             when (m.parameterTypes[i]) {
-                Int::class.javaPrimitiveType, Int::class.javaObjectType -> args[i]
                 Long::class.javaPrimitiveType, Long::class.javaObjectType -> args[i].toLong()
                 Double::class.javaPrimitiveType, Double::class.javaObjectType -> args[i].toDouble()
                 Float::class.javaPrimitiveType, Float::class.javaObjectType -> args[i].toFloat()
                 Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> args[i] != 0
-                Short::class.javaPrimitiveType -> args[i].toShort()
-                Byte::class.javaPrimitiveType -> args[i].toByte()
+                Short::class.javaPrimitiveType, Short::class.javaObjectType -> args[i].toShort()
+                Byte::class.javaPrimitiveType, Byte::class.javaObjectType -> args[i].toByte()
                 else -> args[i]
             }
         }
@@ -163,6 +122,16 @@ class BydDevice(private val context: Context, val className: String) {
 
     companion object {
         private const val TAG = "BydDevice"
+
+        private val INT_CONVERTIBLE: Set<Class<*>?> = setOf(
+            Int::class.javaPrimitiveType, Int::class.javaObjectType,
+            Long::class.javaPrimitiveType, Long::class.javaObjectType,
+            Double::class.javaPrimitiveType, Double::class.javaObjectType,
+            Float::class.javaPrimitiveType, Float::class.javaObjectType,
+            Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType,
+            Short::class.javaPrimitiveType, Short::class.javaObjectType,
+            Byte::class.javaPrimitiveType, Byte::class.javaObjectType,
+        )
 
         fun unwrap(e: Throwable): Throwable =
             if (e is InvocationTargetException && e.targetException != null) e.targetException else e

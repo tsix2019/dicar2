@@ -6,6 +6,7 @@ import com.dicar.vehicle.data.SettingsStore
 import com.dicar.vehicle.data.VehicleRepository
 import com.dicar.vehicle.data.source.bydauto.BydAutoDataSource
 import com.dicar.vehicle.data.source.bydauto.BydAutoProbe
+import com.dicar.vehicle.data.source.bydauto.adb.AdbTransport
 import com.dicar.vehicle.data.source.diplus.DiPlusDataSource
 import com.dicar.vehicle.data.source.mock.MockDataSource
 
@@ -23,10 +24,11 @@ class VehicleApp : Application() {
 /** 手动依赖注入：App 很小，不引入 Hilt/Koin。 */
 class AppContainer(context: Context) {
     val settings = SettingsStore(context)
+    private val adbTransport = AdbTransport(context)
     val repository = VehicleRepository(
         settings = settings,
         sources = listOf(
-            BydAutoDataSource(context),
+            BydAutoDataSource(context, adbTransport),
             DiPlusDataSource(),
             MockDataSource(),
         ),

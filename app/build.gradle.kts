@@ -58,6 +58,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // 连接车机本机 adbd（127.0.0.1:5555），以调试身份起辅助进程读写被签名权限保护的车辆数据
+    implementation(libs.dadb)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)

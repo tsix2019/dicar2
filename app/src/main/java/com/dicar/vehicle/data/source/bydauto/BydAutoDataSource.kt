@@ -1,6 +1,7 @@
 package com.dicar.vehicle.data.source.bydauto
 
 import android.content.Context
+import android.util.Log
 import com.dicar.vehicle.data.model.AcCycleMode
 import com.dicar.vehicle.data.model.CommandResult
 import com.dicar.vehicle.data.model.DataSourceType
@@ -14,34 +15,59 @@ import com.dicar.vehicle.data.source.VehicleDataSource
 import com.dicar.vehicle.data.source.bydauto.BydApiMap.Dev
 import com.dicar.vehicle.data.source.bydauto.BydApiMap.Src
 import com.dicar.vehicle.data.source.bydauto.BydDevice.CallResult
+import com.dicar.vehicle.data.source.bydauto.adb.AdbTransport
 import com.dicar.vehicle.util.ValueSanitizer
 import kotlin.math.roundToInt
 
 /**
- * 主数据源：直接反射调用车机 framework 里的 android.hardware.bydauto.*。
+ * 主数据源：反射调用车机 framework 的 android.hardware.bydauto.*。
  *
- * 读哪个接口、什么编码，全部在 [BydApiMap] 里配置；这里只负责「按表读 → 换算 → 范围校验」。
- * 实车上某项显示 N/A 时：先跑「设置 → 探测 BYDAuto 接口」，对照报告修改 BydApiMap。
+ * 两条通道（见 [BydAccess]）自动择一：
+ * - [AdbBydAccess]：车机调试口开着时走辅助进程（调试身份），多数 DiLink 只有这条能真正读到数据；
+ * - [InProcessBydAccess]：App 自身进程直连（权限允许时）。
+ *
+ * 读哪个接口、什么编码全部在 [BydApiMap] 配置；这里只做「按表读 → 换算 → 范围校验」。
+ * 实车上某项 N/A 时：跑「设置 → 探测 BYDAuto 接口」，对照报告改 BydApiMap。
  */
-class BydAutoDataSource(context: Context) : VehicleDataSource {
+class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleDataSource {
 
     override val type = DataSourceType.BYD_AUTO
 
-    private val ctx = BydPermissionContext(context.applicationContext)
-    private val devices = HashMap<Dev, BydDevice>()
     private val featureIds = BydFeatureIds()
+    private val adb = AdbBydAccess(transport)
+    private val inProcess = InProcessBydAccess(context)
 
-    private fun device(dev: Dev) = devices.getOrPut(dev) { BydDevice(ctx, dev.className) }
+    private var active: BydAccess? = null
+    private lateinit var current: BydAccess // 本次 read/execute 使用的通道
 
-    override suspend fun isAvailable(): Boolean =
-        CORE_DEVICES.any { device(it).isAvailable }
+    private fun pickAccess(): BydAccess? = when {
+        adb.probeAvailable() -> adb
+        inProcess.probeAvailable() -> inProcess
+        else -> null
+    }
+
+    override suspend fun isAvailable(): Boolean {
+        active = pickAccess()
+        return active != null
+    }
+
+    /** 建立/校验通道并记为当前通道；不可用时抛出带原因的异常。 */
+    private fun acquire(): BydAccess {
+        val a = active ?: pickAccess()?.also { active = it }
+            ?: throw IllegalStateException("未检测到车机调试口（127.0.0.1:5555）；请开启无线调试")
+        a.ensureReady()
+        current = a
+        return a
+    }
+
+    // ------------------------------------------------------------------
+    // 读
+    // ------------------------------------------------------------------
 
     override suspend fun read(): VehicleState {
-        check(CORE_DEVICES.any { device(it).isAvailable }) { "BYDAuto 设备均无法实例化" }
+        acquire()
         val m = BydApiMap
-
-        val batteryTempOffset = m.BATTERY_TEMP_OFFSET.toDouble()
-        val turnSignal = int(m.TURN_SIGNAL, 0, 7)
+        val tempOffset = m.BATTERY_TEMP_OFFSET.toDouble()
 
         return VehicleState(
             // 动力
@@ -58,18 +84,22 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
 
             // 电池
             soc = float(m.SOC, 0.0, 100.0),
-            batteryTempMax = float(m.BATTERY_TEMP_MAX, -40.0, 100.0, offset = batteryTempOffset),
-            batteryTempMin = float(m.BATTERY_TEMP_MIN, -40.0, 100.0, offset = batteryTempOffset),
+            batteryTempMax = float(m.BATTERY_TEMP_MAX, -40.0, 100.0, offset = tempOffset),
+            batteryTempMin = float(m.BATTERY_TEMP_MIN, -40.0, 100.0, offset = tempOffset),
             batteryVoltage = float(m.BATTERY_VOLTAGE, 50.0, 1_000.0),
             cellVoltageMax = float(m.CELL_VOLTAGE_MAX, 1.0, 5.0, scale = 0.001),
             cellVoltageMin = float(m.CELL_VOLTAGE_MIN, 1.0, 5.0, scale = 0.001),
             batteryCurrent = float(m.BATTERY_CURRENT, -1_000.0, 1_000.0),
-            chargeGunConnected = int(m.CHARGE_GUN, 1, 3)?.let { it != 1 },
-            chargeStatus = int(m.CHARGE_STATE, 0, 255)?.let { m.CHARGE_STATE_LABELS[it] }
-                ?: int(m.CHARGE_GUN, 1, 3)?.let { m.CHARGE_GUN_LABELS[it] },
+            chargeGunConnected = int(m.CHARGE_GUN, 1, 5)?.let { it >= 2 },
+            chargeStatus = int(m.CHARGE_STATE, 0, 255)?.let { m.CHARGE_STATE_LABELS[it] ?: "状态 $it" }
+                ?: int(m.CHARGE_GUN, 1, 5)?.let { m.CHARGE_GUN_LABELS[it] },
             remainRangeElec = int(m.RANGE_ELEC, 0, 2_000),
             remainRangeFuel = int(m.RANGE_FUEL, 0, 2_000),
             fuelPercent = float(m.FUEL_PERCENT, 0.0, 100.0),
+            instantElecConsumption = float(m.INSTANT_ELEC, 0.0, 100.0),
+            instantFuelConsumption = float(m.INSTANT_FUEL, 0.0, 100.0),
+            tripElecConsumption = float(m.TRIP_ELEC, 0.0, 100.0),
+            tripFuelConsumption = float(m.TRIP_FUEL, 0.0, 100.0),
             voltage12V = float(m.VOLTAGE_12V, 6.0, 20.0),
 
             // 空调
@@ -78,9 +108,7 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
             acTempDriver = float(m.AC_TEMP_DRIVER, 10.0, 40.0),
             acTempPassenger = float(m.AC_TEMP_PASSENGER, 10.0, 40.0),
             acFanLevel = int(m.AC_FAN_LEVEL, 0, 7),
-            acWindMode = int(m.AC_WIND_MODE, 0, 15)?.let { code ->
-                m.AC_WIND_MODE_CODES.entries.firstOrNull { it.value == code }?.key
-            },
+            acWindMode = int(m.AC_WIND_MODE, 0, 15)?.let { code -> m.AC_WIND_MODE_CODES.entries.firstOrNull { it.value == code }?.key },
             acCycle = when (int(m.AC_CYCLE, 0, 1)) {
                 m.AC_CYCLE_INNER -> AcCycleMode.INNER
                 m.AC_CYCLE_OUTER -> AcCycleMode.OUTER
@@ -88,19 +116,16 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
             },
             insideTemp = float(m.INSIDE_TEMP, -50.0, 80.0),
             outsideTemp = float(m.OUTSIDE_TEMP, -50.0, 80.0),
-            seatHeatDriver = int(m.SEAT_HEAT_DRIVER, 0, 5),
-            seatHeatPassenger = int(m.SEAT_HEAT_PASSENGER, 0, 5),
-            seatVentDriver = int(m.SEAT_VENT_DRIVER, 0, 5),
-            seatVentPassenger = int(m.SEAT_VENT_PASSENGER, 0, 5),
+            seatHeatDriver = seatLevel(m.SEAT_HEAT_DRIVER),
+            seatHeatPassenger = seatLevel(m.SEAT_HEAT_PASSENGER),
+            seatVentDriver = seatLevel(m.SEAT_VENT_DRIVER),
+            seatVentPassenger = seatLevel(m.SEAT_VENT_PASSENGER),
 
             // 车身
             doors = Openings(
-                fl = bool(m.door(m.DOOR_FL)),
-                fr = bool(m.door(m.DOOR_FR)),
-                rl = bool(m.door(m.DOOR_RL)),
-                rr = bool(m.door(m.DOOR_RR)),
-                hood = bool(m.door(m.DOOR_HOOD)),
-                trunk = bool(m.door(m.DOOR_TRUNK)),
+                fl = bool(m.door(m.DOOR_FL)), fr = bool(m.door(m.DOOR_FR)),
+                rl = bool(m.door(m.DOOR_RL)), rr = bool(m.door(m.DOOR_RR)),
+                hood = bool(m.door(m.DOOR_HOOD)), trunk = bool(m.door(m.DOOR_TRUNK)),
             ),
             windowPercent = Wheels(
                 int(m.WINDOW_FL, 0, 100), int(m.WINDOW_FR, 0, 100),
@@ -119,29 +144,24 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
             steeringAngle = float(m.STEERING_ANGLE, -900.0, 900.0),
             seatbeltDriver = bool(m.SEATBELT_DRIVER),
             seatbeltPassenger = bool(m.SEATBELT_PASSENGER),
-            turnLeft = turnSignal?.let { it and m.TURN_LEFT_BIT != 0 },
-            turnRight = turnSignal?.let { it and m.TURN_RIGHT_BIT != 0 },
+            turnLeft = bool(m.TURN_LEFT),
+            turnRight = bool(m.TURN_RIGHT),
 
             // 其他
             totalMileage = float(m.TOTAL_MILEAGE_KM, 0.0, 2_000_000.0)
                 ?: float(m.TOTAL_MILEAGE_DECI_KM, 0.0, 2_000_000.0, scale = 0.1),
+            pm25 = int(m.PM25, 0, 3_000),
             slope = float(m.SLOPE, -60.0, 60.0),
 
             acTempStep = m.AC_TEMP_STEP,
+            seatMaxLevel = m.SEAT_MAX_LEVEL,
         )
     }
 
-    // ------------------------------------------------------------------
-    // 读取工具：依次尝试来源，第一个「非错误码且换算后在范围内」的值生效
-    // ------------------------------------------------------------------
-
+    // 依次尝试来源，第一个「非错误码且换算后在范围内」的值生效
     private fun value(sources: List<Src>, min: Double, max: Double, scale: Double = 1.0, offset: Double = 0.0): Double? {
         for (src in sources) {
-            val raw = when (src) {
-                is Src.Getter -> device(src.dev).get(src.method, *src.args.toIntArray())
-                is Src.Fid -> readFid(src)
-            }
-            val converted = ValueSanitizer.toDouble(raw)?.let { it * scale + offset } ?: continue
+            val converted = ValueSanitizer.toDouble(rawValue(src))?.let { it * scale + offset } ?: continue
             if (converted in min..max) return converted
         }
         return null
@@ -153,17 +173,22 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
     private fun int(sources: List<Src>, min: Int, max: Int) =
         value(sources, min.toDouble(), max.toDouble())?.toInt()
 
-    /** 0/1 状态量；255、2 等「未定义/无效」被范围校验挡掉。 */
     private fun bool(sources: List<Src>) = int(sources, 0, 1)?.let { it == 1 }
 
-    private fun readFid(src: Src.Fid): Any? {
-        val fid = featureIds.resolve(src.symbol) ?: return null
-        val target = device(src.dev).takeIf { it.isAvailable } ?: device(Dev.AC)
-        return if (src.isFloat) {
-            target.managerGet("getDouble", src.dev.id, fid)
-        } else {
-            target.get("get", src.dev.id, fid)
+    /** 座椅状态 1 关 / 2 低 / 3 高 → App 档位 0/1/2。 */
+    private fun seatLevel(sources: List<Src>) =
+        int(sources, 0, 3)?.let { (it - 1).coerceIn(0, BydApiMap.SEAT_MAX_LEVEL) }
+
+    private fun rawValue(src: Src): Any? {
+        val cr = when (src) {
+            is Src.Getter -> current.readGetter(src.dev.className, src.method, src.args.toIntArray())
+            is Src.Fid -> {
+                val fid = featureIds.resolve(src.symbol) ?: return null
+                current.readFid(src.dev.id, fid, src.isFloat)
+            }
         }
+        val raw = (cr as? CallResult.Value)?.value ?: return null
+        return if (src is Src.Getter && src.index != null && raw is IntArray) raw.getOrNull(src.index) else raw
     }
 
     // ------------------------------------------------------------------
@@ -171,87 +196,90 @@ class BydAutoDataSource(context: Context) : VehicleDataSource {
     // ------------------------------------------------------------------
 
     override suspend fun execute(command: VehicleCommand): CommandResult {
+        acquire()
         val m = BydApiMap
         return when (command) {
-            is VehicleCommand.AcPower ->
-                setter(Dev.AC, if (command.on) m.AC_START else m.AC_STOP, m.AC_POWER_ARG)
+            is VehicleCommand.AcPower -> namedThenFid(
+                Dev.AC, if (command.on) m.AC_START else m.AC_STOP, intArrayOf(m.AC_POWER_ARG),
+                m.AC_POWER_SET_FID, null, if (command.on) 1 else 0,
+            )
 
-            is VehicleCommand.AcAuto ->
-                setter(Dev.AC, m.AC_SET_CONTROL_MODE, if (command.on) 0 else 1, m.AC_SOURCE)
+            is VehicleCommand.AcAuto -> {
+                val mode = if (command.on) 0 else 1 // 0 自动 / 1 手动
+                namedThenFid(Dev.AC, m.AC_SET_CONTROL_MODE, intArrayOf(mode, m.AC_SOURCE), m.AC_CONTROL_MODE_SET_FID, null, mode)
+            }
 
             is VehicleCommand.AcTemperature -> {
                 val zone = if (command.zone == Zone.DRIVER) m.AC_ZONE_DRIVER else m.AC_ZONE_PASSENGER
-                setter(Dev.AC, m.AC_SET_TEMP, zone, command.celsius.roundToInt(), m.AC_SOURCE, m.AC_TEMP_UNIT_CELSIUS)
+                val temp = command.celsius.roundToInt()
+                val fidSym = if (command.zone == Zone.DRIVER) m.AC_TEMP_DRIVER_SET_FID else m.AC_TEMP_PASSENGER_SET_FID
+                namedThenFid(Dev.AC, m.AC_SET_TEMP, intArrayOf(zone, temp, m.AC_SOURCE, m.AC_TEMP_UNIT_CELSIUS), fidSym, null, temp)
             }
 
             is VehicleCommand.AcFanLevel ->
-                writeFid(Dev.AC, m.AC_WIND_LEVEL_SET_SYMBOL, m.AC_WIND_LEVEL_SET_FALLBACK, command.level)
+                toCommandResult(writeFidSym(Dev.AC, m.AC_WIND_LEVEL_SET_FID, m.AC_WIND_LEVEL_SET_FALLBACK, command.level), "风量")
 
             is VehicleCommand.AcWind -> {
                 val code = m.AC_WIND_MODE_CODES[command.mode]
                     ?: return CommandResult.Unsupported("未配置 ${command.mode.label} 的编码")
-                setter(Dev.AC, m.AC_SET_WIND_MODE, code, m.AC_SOURCE)
+                namedThenFid(Dev.AC, m.AC_SET_WIND_MODE, intArrayOf(code, m.AC_SOURCE), m.AC_WIND_MODE_SET_FID, null, code)
             }
 
             is VehicleCommand.AcCycle -> {
                 val code = if (command.mode == AcCycleMode.INNER) m.AC_CYCLE_INNER else m.AC_CYCLE_OUTER
-                setter(Dev.AC, m.AC_SET_CYCLE, code, m.AC_SOURCE)
+                namedThenFid(Dev.AC, m.AC_SET_CYCLE, intArrayOf(code, m.AC_SOURCE), m.AC_CYCLE_SET_FID, null, code)
             }
 
-            is VehicleCommand.SeatHeat -> seat(
-                if (command.seat == Zone.DRIVER) m.SEAT_HEAT_DRIVER_SET else m.SEAT_HEAT_PASSENGER_SET,
-                command.level,
-            )
+            is VehicleCommand.SeatHeat -> seat(command.seat, command.level, m.SEAT_SET_HEAT,
+                if (command.seat == Zone.DRIVER) m.SEAT_HEAT_DRIVER_SET_FID else m.SEAT_HEAT_PASSENGER_SET_FID)
 
-            is VehicleCommand.SeatVent -> seat(
-                if (command.seat == Zone.DRIVER) m.SEAT_VENT_DRIVER_SET else m.SEAT_VENT_PASSENGER_SET,
-                command.level,
-            )
+            is VehicleCommand.SeatVent -> seat(command.seat, command.level, m.SEAT_SET_VENT,
+                if (command.seat == Zone.DRIVER) m.SEAT_VENT_DRIVER_SET_FID else m.SEAT_VENT_PASSENGER_SET_FID)
 
             is VehicleCommand.Quick -> when (command.action) {
-                QuickAction.FRONT_DEFROST -> writeFid(Dev.AC, m.AC_DEFROST_FRONT_SET_SYMBOL, null, 1)
-                QuickAction.QUICK_COOL -> setter(Dev.AC, m.AC_SET_MAX_COOLING, 1)
-                QuickAction.PURIFY -> CommandResult.Unsupported("未找到净化接口")
+                QuickAction.FRONT_DEFROST -> namedThenFid(
+                    Dev.AC, m.AC_SET_DEFROST, intArrayOf(1, 1, m.AC_SOURCE), m.AC_DEFROST_FRONT_SET_FID, null, 1)
+                QuickAction.QUICK_COOL -> toCommandResult(writeFidSym(Dev.AC, m.AC_MAX_COOLING_SET_FID, null, 1), "快速降温")
+                QuickAction.PURIFY -> toCommandResult(writeFidSym(Dev.AC, m.AC_QUICK_CLEAN_SET_FID, null, 1), "一键净化")
             }
         }
     }
 
-    /** 座椅：档位 0 → 写开关「关」；档位 n → 写开关「开」再写档位。 */
-    private fun seat(symbols: Pair<String, String>, level: Int): CommandResult {
-        val (switchSymbol, levelSymbol) = symbols
-        if (level <= 0) return writeFid(Dev.AC, switchSymbol, null, BydApiMap.SEAT_SWITCH_OFF)
-        val switched = writeFid(Dev.AC, switchSymbol, null, BydApiMap.SEAT_SWITCH_ON)
-        if (switched != CommandResult.Sent) return switched
-        return writeFid(Dev.AC, levelSymbol, null, level)
+    /** 座椅：档位 n → 状态 n+1（1 关 / 2 低 / 3 高）。先试命名接口，缺失则写 FID。 */
+    private fun seat(zone: Zone, level: Int, method: String, fidSymbol: String): CommandResult {
+        val area = if (zone == Zone.DRIVER) BydApiMap.SEAT_DRIVER else BydApiMap.SEAT_PASSENGER
+        val state = level + 1
+        return namedThenFid(Dev.SETTING, method, intArrayOf(area, state), fidSymbol, null, state)
     }
 
-    private fun setter(dev: Dev, method: String, vararg args: Int): CommandResult =
-        toCommandResult(device(dev).call(method, *args), method)
+    private fun namedThenFid(dev: Dev, method: String, args: IntArray, fidSymbol: String, fallbackFid: Int?, fidValue: Int): CommandResult {
+        val r = current.callSetter(dev.className, method, args)
+        if (r is CallResult.Missing) return toCommandResult(writeFidSym(dev, fidSymbol, fallbackFid, fidValue), fidSymbol)
+        return toCommandResult(r, method)
+    }
 
-    private fun writeFid(dev: Dev, symbol: String, fallbackFid: Int?, value: Int): CommandResult {
-        val fid = featureIds.resolve(symbol) ?: fallbackFid
-            ?: return CommandResult.Unsupported("本车固件无 $symbol")
-        return toCommandResult(device(dev).call("set", dev.id, fid, value), symbol)
+    private fun writeFidSym(dev: Dev, symbol: String, fallbackFid: Int?, value: Int): CallResult {
+        val fid = featureIds.resolve(symbol) ?: fallbackFid ?: return CallResult.Missing
+        return current.writeFid(dev.id, fid, value)
     }
 
     private fun toCommandResult(result: CallResult, name: String): CommandResult = when (result) {
         CallResult.Missing -> CommandResult.Unsupported("接口不存在：$name")
         is CallResult.Error -> CommandResult.Failed(
-            if (result.error is SecurityException) "无权限：${result.error.message}" else result.error.toString()
+            if (result.error is SecurityException) "无权限（请用无线调试授权）" else (result.error.message ?: result.error.toString())
         )
         is CallResult.Value -> {
-            // 返回码：0 / 正数 = 成功；BYDAuto 错误码（-2147482648 失败 / -2147482647 忙 / -2147482646 超时 …）= 失败
             val code = (result.value as? Number)?.toInt()
-            if (code != null && ValueSanitizer.isErrorCode(code)) {
-                CommandResult.Failed("返回码 $code")
-            } else {
-                CommandResult.Sent
-            }
+            if (code != null && ValueSanitizer.isErrorCode(code)) CommandResult.Failed("返回码 $code") else CommandResult.Sent
         }
     }
 
+    override fun release() {
+        adb.close()
+        Log.i(TAG, "released")
+    }
+
     private companion object {
-        /** 任一可实例化即认为 BYDAuto 可用。 */
-        val CORE_DEVICES = listOf(Dev.AC, Dev.STATISTIC, Dev.SPEED, Dev.BODYWORK)
+        const val TAG = "BydAutoDataSource"
     }
 }

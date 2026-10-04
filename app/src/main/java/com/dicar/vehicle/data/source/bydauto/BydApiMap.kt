@@ -7,19 +7,19 @@ import com.dicar.vehicle.data.model.AcWindMode
  *
  * 每个字段按顺序尝试多个来源，第一个返回有效值的生效：
  * - [Src.Getter]：设备类上的命名方法，如 BYDAutoSpeedDevice.getCurrentSpeed()；
- * - [Src.Fid]：通用 get(dev, fid)。fid 用 BYDAutoFeatureIds 里的「嵌套类.字段名」在车机上反射解析，
- *   因为同一功能在不同平台的 fid 数值不同，按名字解析比写死数字可靠。
+ * - [Src.Fid]：通过 BYDAutoDeviceManager.getInt/getDouble(dev, fid) 直读。fid 用 BYDAutoFeatureIds
+ *   里的字段名在车机上反射解析，因为同一功能在不同平台的 fid 数值不同（如 SPEED_AUTO_SPEED）。
  *
  * 来源标记（务必保留，方便判断可信度）：
- *   [D3]  wheregoes/byd-apps 在 DiLink 3（Dolphin / Song Pro GS）实车验证
- *   [D5]  AndyShaman/BYDMate 在 DiLink 5（Leopard 3）实车验证的 fid 符号/编码
- *   [X]   第三方反射代码中出现，未见实车验证
- *   [?]   推测，需用「设置 → 探测 BYDAuto 接口」核对
- * 没有任何一条在 DiLink 4.0 上验证过。
+ *   [D4]  本车 DiLink 4.0（Android 10，2023-11 固件）探测报告中确认存在的方法 / 常量 / FID 符号。
+ *         注意：报告里所有读数都被系统拒绝（permission deny），所以「存在」已确认，「读数含义」仍待验证
+ *   [D3]  wheregoes/byd-apps 在 DiLink 3（海豚 / 宋 Pro）实车验证
+ *   [D5]  AndyShaman/BYDMate 在 DiLink 5（豹 3）实车验证的 FID 编码
+ *   [?]   推测
  */
 object BydApiMap {
 
-    /** autoservice 设备类型 id 与对应 Java 类（BYDMate FidPushWire.kt，由固件反编译生成）。 */
+    /** autoservice 设备类型 id 与对应 Java 类。 */
     enum class Dev(val id: Int, val className: String) {
         AC(1000, "android.hardware.bydauto.ac.BYDAutoAcDevice"),
         BODYWORK(1001, "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice"),
@@ -39,10 +39,12 @@ object BydApiMap {
         DOOR_LOCK(1041, "android.hardware.bydauto.doorlock.BYDAutoDoorLockDevice"),
         SAFETY_BELT(1042, "android.hardware.bydauto.safetybelt.BYDAutoSafetyBeltDevice"),
         SENSOR(1043, "android.hardware.bydauto.sensor.BYDAutoSensorDevice"),
+        PM2P5(-1, "android.hardware.bydauto.pm2p5.BYDAutoPM2p5Device"),
     }
 
     sealed interface Src {
-        data class Getter(val dev: Dev, val method: String, val args: List<Int> = emptyList()) : Src
+        /** [index]：方法返回数组时取第几个元素（如 PM2.5）。 */
+        data class Getter(val dev: Dev, val method: String, val args: List<Int> = emptyList(), val index: Int? = null) : Src
         data class Fid(val dev: Dev, val symbol: String, val isFloat: Boolean = false) : Src
     }
 
@@ -51,10 +53,14 @@ object BydApiMap {
 
     const val FEATURE_IDS_CLASS = "android.hardware.bydauto.BYDAutoFeatureIds"
 
+    /** FID 通道：DiLink 4.0 上 AbsBYDAutoDevice 没有 get(dev, fid)，只能走 manager [D4]。 */
+    const val DEVICE_MANAGER_CLASS = "android.hardware.bydauto.BYDAutoDeviceManager"
+
     /** 探测工具的已知类列表（dex 扫描失败时兜底）。 */
     val KNOWN_DEVICE_CLASSES: List<String> =
         Dev.entries.map { it.className } + listOf(
             FEATURE_IDS_CLASS,
+            DEVICE_MANAGER_CLASS,
             "android.hardware.bydauto.BYDAutoConstants",
             "android.hardware.bydauto.AbsBYDAutoDevice",
         )
@@ -63,113 +69,131 @@ object BydApiMap {
     // 读：动力与行驶
     // =====================================================================
 
-    val SPEED = listOf(getter(Dev.SPEED, "getCurrentSpeed") /*[X] double km/h*/, fid(Dev.SPEED, "Speed.SPEED_AUTO_SPEED", true) /*[D5]*/)
-    val ENGINE_RPM = listOf(getter(Dev.ENGINE, "getEngineSpeed") /*[X]*/)
-    val MOTOR_RPM_FRONT = listOf(fid(Dev.ENGINE, "Engine.ENGINE_FRONT_MOTOR_SPEED") /*[D5]*/)
-    val MOTOR_RPM_REAR = listOf(fid(Dev.ENGINE, "Engine.ENGINE_REAR_MOTOR_SPEED") /*[D5]*/)
+    val SPEED = listOf(getter(Dev.SPEED, "getCurrentSpeed") /*[D4] double km/h*/, fid(Dev.SPEED, "Speed.SPEED_AUTO_SPEED", true) /*[D4]*/)
+    val ENGINE_RPM = listOf(getter(Dev.ENGINE, "getEngineSpeed") /*[D4]*/)
+    val MOTOR_RPM_FRONT = listOf(fid(Dev.ENGINE, "Engine.ENGINE_FRONT_MOTOR_SPEED") /*[D4]*/)
+    val MOTOR_RPM_REAR = listOf(fid(Dev.ENGINE, "Engine.ENGINE_REAR_MOTOR_SPEED") /*[D4]*/)
 
-    /** 整车驱动功率 kW，负值=回收/充电。注意迪加里同一信号叫「发动机功率」，实为整车功率。 */
-    val POWER = listOf(fid(Dev.ENGINE, "Engine.ENGINE_POWER") /*[D5]*/, getter(Dev.ENGINE, "getEnginePower") /*[X]*/)
-    val ACCELERATOR = listOf(getter(Dev.SPEED, "getAccelerateDeepness") /*[X] 0-100*/, fid(Dev.SPEED, "Speed.SPEED_ACCELERATOR_S") /*[D5]*/)
-    val BRAKE = listOf(getter(Dev.SPEED, "getBrakeDeepness") /*[X] 0-100*/, fid(Dev.SPEED, "Speed.SPEED_BRAKE_S") /*[D5]*/)
+    /** 整车驱动功率 kW，负值=回收/充电（BYDMate 实测 ENGINE_POWER 为整车功率）。 */
+    val POWER = listOf(fid(Dev.ENGINE, "Engine.ENGINE_POWER") /*[D4][D5]*/, getter(Dev.ENGINE, "getEnginePower") /*[D4]*/)
+    val ACCELERATOR = listOf(getter(Dev.SPEED, "getAccelerateDeepness") /*[D4] 0-100*/, fid(Dev.SPEED, "Speed.SPEED_ACCELERATOR_S") /*[D4]*/)
+    val BRAKE = listOf(getter(Dev.SPEED, "getBrakeDeepness") /*[D4] 0-100*/, fid(Dev.SPEED, "Speed.SPEED_BRAKE_S") /*[D4]*/)
 
-    val GEAR = listOf(getter(Dev.GEARBOX, "getGearboxAutoModeType") /*[X]*/, fid(Dev.GEARBOX, "Gearbox.GEARBOX_AUTO_MODE_TYPE") /*[D5]*/)
-    val GEAR_LABELS = mapOf(1 to "P", 2 to "R", 3 to "N", 4 to "D", 5 to "M", 6 to "S") // [D5]+[X]
+    /** GEARBOX_AUTO_MODE_P=1 R=2 N=3 D=4 M=5 S=6 [D4] */
+    val GEAR = listOf(getter(Dev.GEARBOX, "getGearboxAutoModeType"), fid(Dev.GEARBOX, "Gearbox.GEARBOX_AUTO_MODE_TYPE"))
+    val GEAR_LABELS = mapOf(1 to "P", 2 to "R", 3 to "N", 4 to "D", 5 to "M", 6 to "S")
 
-    val WORK_MODE = listOf(fid(Dev.ENERGY, "Energy.ENERGY_MODE_INSTRUMENT") /*[D5]*/, getter(Dev.ENERGY, "getEnergyMode") /*[X]*/)
-    val WORK_MODE_LABELS = mapOf(0 to "停止", 1 to "EV", 2 to "强制EV", 3 to "HEV") // [?] 按迪加「整车工作模式」编码推测
+    /** ENERGY_MODE_STOP=0 EV=1 FORCE_EV=2 HEV=3 FUEL=4 KEEP=5 [D4] */
+    val WORK_MODE = listOf(getter(Dev.ENERGY, "getEnergyMode"), fid(Dev.ENERGY, "Energy.ENERGY_MODE_INSTRUMENT"))
+    val WORK_MODE_LABELS = mapOf(0 to "停止", 1 to "EV", 2 to "强制EV", 3 to "HEV", 4 to "燃油", 5 to "保电")
 
-    val DRIVE_MODE = listOf(fid(Dev.ENERGY, "Energy.ENERGY_OPERATION_MODE") /*[D5]*/, getter(Dev.ENERGY, "getOperationMode") /*[X]*/)
-    val DRIVE_MODE_LABELS = mapOf(1 to "ECO", 2 to "运动") // [?] 按迪加「整车运行模式」编码推测
+    /** ENERGY_OPERATION_ECONOMY=1 SPORT=2 NORMAL=3 SNOW=4 MUDDY=5 SAND=6 [D4] */
+    val DRIVE_MODE = listOf(getter(Dev.ENERGY, "getOperationMode"), fid(Dev.ENERGY, "Energy.ENERGY_OPERATION_MODE"))
+    val DRIVE_MODE_LABELS = mapOf(1 to "经济", 2 to "运动", 3 to "普通", 4 to "雪地", 5 to "泥地", 6 to "沙地")
 
     // =====================================================================
     // 读：电池与能量
     // =====================================================================
 
-    val SOC = listOf(getter(Dev.STATISTIC, "getElecPercentageValue") /*[D3] double %*/, fid(Dev.STATISTIC, "Statistic.STATISTIC_ELEC_PERCENTAGE", true) /*[D5]*/)
+    val SOC = listOf(getter(Dev.STATISTIC, "getElecPercentageValue") /*[D4] double %*/, fid(Dev.STATISTIC, "Statistic.STATISTIC_ELEC_PERCENTAGE", true) /*[D4]*/)
 
-    /** 原始值 - 40 = ℃ [D5] */
+    /** 原始值 - 40 = ℃ [D4 符号][D5 编码]；本固件无命名 getter */
     val BATTERY_TEMP_MAX = listOf(fid(Dev.STATISTIC, "Statistic.STATISTIC_HIGHEST_BATTERY_TEMP"))
     val BATTERY_TEMP_MIN = listOf(fid(Dev.STATISTIC, "Statistic.STATISTIC_LOWEST_BATTERY_TEMP"))
     const val BATTERY_TEMP_OFFSET = -40
 
-    /** 单体电压，单位 mV [D5] */
+    /** 单体电压，单位 mV [D4 符号][D5 编码] */
     val CELL_VOLTAGE_MAX = listOf(fid(Dev.STATISTIC, "Statistic.STATISTIC_HIGHEST_BATTERY_VOLTAGE"))
     val CELL_VOLTAGE_MIN = listOf(fid(Dev.STATISTIC, "Statistic.STATISTIC_LOWEST_BATTERY_VOLTAGE"))
 
-    /** 动力电池总电压 V / 电流 A（负=充电）[D5] */
+    /** 动力电池总电压 V / 电流 A（负=充电）[D4 符号][D5 编码] */
     val BATTERY_VOLTAGE = listOf(fid(Dev.CHARGING, "Charging.CHARGING_CHARGE_BATTERY_VOLT"))
     val BATTERY_CURRENT = listOf(fid(Dev.CHARGING, "Charging.CHARGING_CHARGE_CURRENT", true))
 
-    /** 充电枪：1 无枪、2 交流、3 直流 [D5] */
+    /** CHARGING_GUN_STATE_CONNECTED_NONE=1 AC=2 DC=3 AC_DC=4 VTOL=5 [D4] */
     val CHARGE_GUN = listOf(fid(Dev.CHARGING, "Charging.CHARGING_GUN_CONNECT_STATE"))
-    val CHARGE_GUN_LABELS = mapOf(1 to "未插枪", 2 to "交流枪", 3 to "直流枪")
+    val CHARGE_GUN_LABELS = mapOf(1 to "未插枪", 2 to "交流枪", 3 to "直流枪", 4 to "交直流", 5 to "对外放电")
 
-    /** BMS 充电状态 [D5] */
-    val CHARGE_STATE = listOf(fid(Dev.CHARGING, "Charging.CHARGING_BATTERRY_DEVICE_STATE"))
-    val CHARGE_STATE_LABELS = mapOf(1 to "充电中", 2 to "充电完成", 13 to "充电暂停")
+    /** CHARGING_BATTERY_STATE_READY=0 CHARGING=1 FINISH=2 DISCHARG=3 TERMINATE=4 … PAUSE=13 [D4] */
+    val CHARGE_STATE = listOf(fid(Dev.CHARGING, "Charging.CHARGING_BATTERRY_DEVICE_STATE"), getter(Dev.CHARGING, "getBatteryManagementDeviceState"))
+    val CHARGE_STATE_LABELS = mapOf(
+        0 to "未充电", 1 to "充电中", 2 to "充电完成", 3 to "放电中", 4 to "充电终止",
+        9 to "预约充电", 11 to "充电超时", 12 to "放电完成", 13 to "充电暂停",
+    )
 
-    val RANGE_ELEC = listOf(getter(Dev.STATISTIC, "getElecDrivingRangeValue") /*[X] km*/)
-    val RANGE_FUEL = listOf(getter(Dev.STATISTIC, "getFuelDrivingRangeValue") /*[?]*/)
-    val FUEL_PERCENT = listOf(getter(Dev.STATISTIC, "getFuelPercentageValue") /*[?]*/)
+    val RANGE_ELEC = listOf(getter(Dev.STATISTIC, "getElecDrivingRangeValue") /*[D4] km*/)
+    val RANGE_FUEL = listOf(getter(Dev.STATISTIC, "getFuelDrivingRangeValue") /*[D4] km*/)
+    val FUEL_PERCENT = listOf(getter(Dev.STATISTIC, "getFuelPercentageValue") /*[D4]*/)
 
-    /** 12V 蓄电池电压。注意 dev 是 1001 而符号在 Ota 名下 [D5] */
+    /** 瞬时能耗 [D4]（单位按仪表推测：kWh/100km、L/100km）[?] */
+    val INSTANT_ELEC = listOf(getter(Dev.STATISTIC, "getInstantElecConValue"))
+    val INSTANT_FUEL = listOf(getter(Dev.STATISTIC, "getInstantFuelConValue"))
+
+    /** 近程百公里能耗 [D4]（Last…PHM，推测为仪表「近 50km」口径）[?] */
+    val TRIP_ELEC = listOf(getter(Dev.STATISTIC, "getLastElecConPHMValue"))
+    val TRIP_FUEL = listOf(getter(Dev.STATISTIC, "getLastFuelConPHMValue"))
+
+    /** 12V 蓄电池电压。注意 dev 是 1001 而符号在 Ota 名下 [D4 符号][D5] */
     val VOLTAGE_12V = listOf(fid(Dev.BODYWORK, "Ota.OTA_BATTERY_POWER_VOLTAGE", true))
-
-    // TODO 行程电耗/油耗（F16）：暂无可靠来源。候选：Statistic.STATISTIC_TOTAL_ELEC_CON_PHM（这是累计平均，不是本次行程）
 
     // =====================================================================
     // 读：空调与座椅
     // =====================================================================
 
-    /** 0 关 / 1 开 [D3] */
-    val AC_ON = listOf(getter(Dev.AC, "getAcStartState"), fid(Dev.AC, "Ac.AC_POWER_STATE") /*[D5]*/)
+    /** AC_POWER_ON=1 / OFF=0 [D4] */
+    val AC_ON = listOf(getter(Dev.AC, "getAcStartState"), fid(Dev.AC, "Ac.AC_POWER_STATE"))
 
-    /** 0 自动 / 1 手动 [D3] */
-    val AC_CONTROL_MODE = listOf(getter(Dev.AC, "getAcControlMode"), fid(Dev.AC, "Ac.AC_CTRL_MODE") /*[D5]*/)
+    /** AC_CTRLMODE_AUTO=0 / MANUAL=1 [D4] */
+    val AC_CONTROL_MODE = listOf(getter(Dev.AC, "getAcControlMode"), fid(Dev.AC, "Ac.AC_CTRL_MODE"))
 
-    /** getTemprature(区域)，拼写错误是原接口如此。区域：1 主驾、2 副驾、4 车外；直接是 ℃ [D3] */
+    /** getTemprature(区域)（拼写错误是原接口如此）：AC_TEMPERATURE_MAIN=1 DEPUTY=2 OUT=4；直接是 ℃ [D4] */
     const val AC_ZONE_DRIVER = 1
     const val AC_ZONE_PASSENGER = 2
     const val AC_ZONE_OUTSIDE = 4
     val AC_TEMP_DRIVER = listOf(getter(Dev.AC, "getTemprature", AC_ZONE_DRIVER), fid(Dev.AC, "Ac.AC_TEMP_MAIN"))
-    val AC_TEMP_PASSENGER = listOf(getter(Dev.AC, "getTemprature", AC_ZONE_PASSENGER), fid(Dev.AC, "Ac.AC_TEMP_DEPUTY") /*[?]*/)
-    val OUTSIDE_TEMP = listOf(
-        getter(Dev.AC, "getTemprature", AC_ZONE_OUTSIDE),
-        getter(Dev.INSTRUMENT, "getOutCarTemperature"),
-        fid(Dev.AC, "Ac.AC_TEMP_OUT") /*[D5]*/,
-    )
+    val AC_TEMP_PASSENGER = listOf(getter(Dev.AC, "getTemprature", AC_ZONE_PASSENGER), fid(Dev.AC, "Ac.AC_TEMP_DEPUTY"))
+    val OUTSIDE_TEMP = listOf(getter(Dev.AC, "getTemprature", AC_ZONE_OUTSIDE), fid(Dev.AC, "Ac.AC_TEMP_OUT"))
+
+    /** 本固件没有 AC_TEMP_INSIDE，也没有车内温度 getter；保留 FID 以兼容其他固件 */
     val INSIDE_TEMP = listOf(fid(Dev.AC, "Ac.AC_TEMP_INSIDE") /*[D5]*/)
 
-    /** 0-7 [D3] */
-    val AC_FAN_LEVEL = listOf(getter(Dev.AC, "getAcWindLevel"), fid(Dev.AC, "Ac.AC_WIND_LEVEL") /*[D5]*/)
+    /** AC_WINDLEVEL_0..7 [D4] */
+    val AC_FAN_LEVEL = listOf(getter(Dev.AC, "getAcWindLevel"), fid(Dev.AC, "Ac.AC_WIND_LEVEL"))
 
-    /** 0 内循环 / 1 外循环（命名接口的编码，与 FID 写入的编码相反！）[D3] */
-    val AC_CYCLE = listOf(getter(Dev.AC, "getAcCycleMode"))
-    const val AC_CYCLE_INNER = 0
-    const val AC_CYCLE_OUTER = 1
+    /** AC_CYCLEMODE_INLOOP=1（内循环）/ OUTLOOP=0（外循环）[D4]。旧资料（DiLink 3）写的是反的 */
+    val AC_CYCLE = listOf(getter(Dev.AC, "getAcCycleMode"), fid(Dev.AC, "Ac.AC_CYCLE_MODE"))
+    const val AC_CYCLE_INNER = 1
+    const val AC_CYCLE_OUTER = 0
 
-    /** 出风模式：仅确认 1=吹面、5=吹脚、0=除霜 [D3]，其余为 [?]，以探测出的 AC_WINDMODE_* 常量为准 */
-    val AC_WIND_MODE = listOf(getter(Dev.AC, "getAcWindMode"), fid(Dev.AC, "Ac.AC_WIND_MODE") /*[D5]*/)
+    /** AC_WINDMODE_FACE=1 FACEFOOT=2 FOOT=3 FOOTDEFROST=4 DEFROST=5（另有 FACEFOOTDEFROST=6 FACEDEFROST=7）[D4] */
+    val AC_WIND_MODE = listOf(getter(Dev.AC, "getAcWindMode"), fid(Dev.AC, "Ac.AC_WIND_MODE"))
     val AC_WIND_MODE_CODES = mapOf(
-        AcWindMode.DEFROST to 0,       // [D3]
-        AcWindMode.FACE to 1,          // [D3]
-        AcWindMode.FACE_FEET to 2,     // [?]
-        AcWindMode.FEET to 5,          // [D3]
-        AcWindMode.FEET_DEFROST to 6,  // [?]
+        AcWindMode.FACE to 1,
+        AcWindMode.FACE_FEET to 2,
+        AcWindMode.FEET to 3,
+        AcWindMode.FEET_DEFROST to 4,
+        AcWindMode.DEFROST to 5,
     )
 
-    /** 座椅加热/通风档位：0 关、1..5 档 [D5] */
-    val SEAT_HEAT_DRIVER = listOf(fid(Dev.AC, "Ac.AC_MAIN_DRIVE_SEAT_HEATING_LEVEL"))
-    val SEAT_HEAT_PASSENGER = listOf(fid(Dev.AC, "Ac.AC_PASSENGER_SEAT_HEATING_LEVEL"))
-    val SEAT_VENT_DRIVER = listOf(fid(Dev.AC, "Ac.AC_MAIN_DRIVE_SEAT_VENTILATING_LEVEL"))
-    val SEAT_VENT_PASSENGER = listOf(fid(Dev.AC, "Ac.AC_PASSENGER_SEAT_VENTILATING_LEVEL"))
+    /**
+     * 座椅加热/通风 [D4]：BYDAutoSettingDevice.getSeatHeatingState(座位) / getSeatVentilatingState(座位)。
+     * 座位：DRIVER_SEAT=1 PASSENGER_SEAT=2；状态：OFF=1 LOW=2 HIGH=3 → App 档位 = 状态 - 1（0 关 / 1 低 / 2 高）。
+     * FID 兜底：SET_DRIVER_SEAT_HEATING_STATE 等（编码同上 [?]）。
+     */
+    const val SEAT_DRIVER = 1
+    const val SEAT_PASSENGER = 2
+    const val SEAT_STATE_OFFSET = -1
+    const val SEAT_MAX_LEVEL = 2
+    val SEAT_HEAT_DRIVER = listOf(getter(Dev.SETTING, "getSeatHeatingState", SEAT_DRIVER), fid(Dev.SETTING, "Setting.SET_DRIVER_SEAT_HEATING_STATE"))
+    val SEAT_HEAT_PASSENGER = listOf(getter(Dev.SETTING, "getSeatHeatingState", SEAT_PASSENGER), fid(Dev.SETTING, "Setting.SET_PASSENGER_SEAT_HEATING_STATE"))
+    val SEAT_VENT_DRIVER = listOf(getter(Dev.SETTING, "getSeatVentilatingState", SEAT_DRIVER), fid(Dev.SETTING, "Setting.SET_DRIVER_SEAT_VENTILATING_STATE"))
+    val SEAT_VENT_PASSENGER = listOf(getter(Dev.SETTING, "getSeatVentilatingState", SEAT_PASSENGER), fid(Dev.SETTING, "Setting.SET_PASSENGER_SEAT_VENTILATING_STATE"))
 
     // =====================================================================
     // 读：车身与安全
     // =====================================================================
 
-    /** getDoorState(区域)：0 关 / 1 开 / 255 未定义；区域 1 左前 2 右前 3 左后 4 右后 5 引擎盖 6 后备箱 [D3] */
+    /** getDoorState(区域)：0 关 / 1 开 / 255 未定义；BODYWORK_CMD_DOOR_LEFT_FRONT=1 … HOOD=5 LUGGAGE_DOOR=6 [D4] */
     const val DOOR_FL = 1
     const val DOOR_FR = 2
     const val DOOR_RL = 3
@@ -178,34 +202,39 @@ object BydApiMap {
     const val DOOR_TRUNK = 6
     fun door(area: Int) = listOf(getter(Dev.BODYWORK, "getDoorState", area))
 
-    /** 车窗开度 % [D5] */
-    val WINDOW_FL = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_LEFT_FRONT_PERCENT"))
-    val WINDOW_FR = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_RIGHT_FRONT_PERCENT"))
-    val WINDOW_RL = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_LEFT_REAR_PERCENT"))
-    val WINDOW_RR = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_RIGHT_REAR_PERCENT"))
-    val SUNROOF = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_MOON_ROOF_OPEN_PERCENT"))
-    val SUNSHADE = listOf(fid(Dev.BODYWORK, "Bodywork.BODYWORK_SUNSHADE_PANEL_PERCENT") /*[?]*/)
+    /** getWindowOpenPercent(区域) 0-100：BODYWORK_CMD_WINDOW_LEFT_FRONT=1 … RIGHT_REAR=4，MOON_ROOF=5，SUNSHADE_PANEL=6 [D4] */
+    val WINDOW_FL = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 1), fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_LEFT_FRONT_PERCENT"))
+    val WINDOW_FR = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 2), fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_RIGHT_FRONT_PERCENT"))
+    val WINDOW_RL = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 3), fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_LEFT_REAR_PERCENT"))
+    val WINDOW_RR = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 4), fid(Dev.BODYWORK, "Bodywork.BODYWORK_WINDOW_RIGHT_REAR_PERCENT"))
+    val SUNROOF = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 5), fid(Dev.BODYWORK, "Bodywork.BODYWORK_MOON_ROOF_OPEN_PERCENT"))
+    val SUNSHADE = listOf(getter(Dev.BODYWORK, "getWindowOpenPercent", 6), fid(Dev.BODYWORK, "Bodywork.BODYWORK_SUNSHADE_PANEL_PERCENT"))
 
-    /** 胎压 kPa [D5] */
-    val TIRE_PRESSURE_FL = listOf(fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_LEFT_FRONT"))
-    val TIRE_PRESSURE_FR = listOf(fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_RIGHT_FRONT"))
-    val TIRE_PRESSURE_RL = listOf(fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_LEFT_REAR"))
-    val TIRE_PRESSURE_RR = listOf(fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_RIGHT_REAR"))
+    /** getTyrePressureValue(区域) kPa：TYRE_COMMAND_AREA_LEFT_FRONT=1 RIGHT_FRONT=2 LEFT_REAR=3 RIGHT_REAR=4 [D4] */
+    val TIRE_PRESSURE_FL = listOf(getter(Dev.TYRE, "getTyrePressureValue", 1), fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_LEFT_FRONT"))
+    val TIRE_PRESSURE_FR = listOf(getter(Dev.TYRE, "getTyrePressureValue", 2), fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_RIGHT_FRONT"))
+    val TIRE_PRESSURE_RL = listOf(getter(Dev.TYRE, "getTyrePressureValue", 3), fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_LEFT_REAR"))
+    val TIRE_PRESSURE_RR = listOf(getter(Dev.TYRE, "getTyrePressureValue", 4), fid(Dev.TYRE, "Tyre.TYRE_PRESSURE_VALUE_RIGHT_REAR"))
 
-    /** 胎温 ℃（仅部分车型有）[D5] */
+    /** 胎温 ℃（仅部分车型有）[D4 符号] */
     val TIRE_TEMP_FL = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_2IN1_LF_TYRE_TEMPERATURE"))
     val TIRE_TEMP_FR = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_2IN1_RF_TYRE_TEMPERATURE"))
     val TIRE_TEMP_RL = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_2IN1_LB_TYRE_TEMPERATURE"))
     val TIRE_TEMP_RR = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_2IN1_RB_TYRE_TEMPERATURE"))
 
-    val STEERING_ANGLE: List<Src> = emptyList() // TODO [?] 未找到来源，迪加有「方向盘转角」
+    /** getSteeringWheelValue(BODYWORK_CMD_STEERING_WHEEL_ANGEL=1)，范围 ±780° [D4] */
+    val STEERING_ANGLE = listOf(getter(Dev.BODYWORK, "getSteeringWheelValue", 1))
 
-    /** 安全带：0 未系 / 1 已系 / 2 无效 [D5] */
-    val SEATBELT_DRIVER = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_MAIN_SAFETYBELT_STATE"))
-    val SEATBELT_PASSENGER = listOf(fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_DEPUTY_SAFETYBELT_STATE"))
+    /** getSafetyBeltStatus(区域)：SAFETY_BELT_AREA_MAIN=1 DEPUTY=2；STATE_LOCK=1 已系 / UNLOCK=0 [D4] */
+    val SEATBELT_DRIVER = listOf(getter(Dev.SAFETY_BELT, "getSafetyBeltStatus", 1), fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_MAIN_SAFETYBELT_STATE"))
+    val SEATBELT_PASSENGER = listOf(getter(Dev.SAFETY_BELT, "getSafetyBeltStatus", 2), fid(Dev.INSTRUMENT, "Instrument.INSTRUMENT_DD_DEPUTY_SAFETYBELT_STATE"))
 
-    /** 转向灯位掩码：1 关、2 左、4 右、6 双闪 [D5] */
-    val TURN_SIGNAL = listOf(fid(Dev.LIGHT, "Light.LIGHT_TURN_SIGNAL_LIGHT"))
+    /** getLightStatus(LIGHT_LEFT_TURN_SIGNAL=4 / LIGHT_RIGHT_TURN_SIGNAL=5)：LIGHT_ON=1 [D4] */
+    val TURN_LEFT = listOf(getter(Dev.LIGHT, "getLightStatus", 4))
+    val TURN_RIGHT = listOf(getter(Dev.LIGHT, "getLightStatus", 5))
+
+    /** 兜底：转向灯位掩码 1 关、2 左、4 右、6 双闪 [D4 符号][D5 编码] */
+    val TURN_SIGNAL_MASK = listOf(fid(Dev.LIGHT, "Light.LIGHT_TURN_SIGNAL_LIGHT"))
     const val TURN_LEFT_BIT = 2
     const val TURN_RIGHT_BIT = 4
 
@@ -213,57 +242,65 @@ object BydApiMap {
     // 读：其他
     // =====================================================================
 
-    /** 命名接口直接是 km [D3]；FID 是 0.1 km [D5] */
+    /** 命名接口直接是 km [D4]；FID 是 0.1 km [D5] */
     val TOTAL_MILEAGE_KM = listOf(getter(Dev.STATISTIC, "getTotalMileageValue"))
     val TOTAL_MILEAGE_DECI_KM = listOf(fid(Dev.STATISTIC, "Statistic.STATISTIC_TOTAL_MILEAGE"))
-    val SLOPE = listOf(getter(Dev.SENSOR, "getSlope") /*[?]*/)
+
+    /** getPM2p5Value() 返回 int[]，0-3000 μg/m³；取第 0 个（推测为车内）[D4][?] */
+    val PM25 = listOf(Src.Getter(Dev.PM2P5, "getPM2p5Value", index = 0))
+
+    /** 本固件 SensorDevice 只有 getLightIntensity，没有坡度 */
+    val SLOPE: List<Src> = emptyList()
 
     // =====================================================================
-    // 写：控制
+    // 写：控制。优先命名接口，接口不存在时写 FID（FID 写入值来自 BYDMate 豹 3 实测）
     // =====================================================================
 
-    /** start(0) / stop(0) [D3] */
+    /** start(来源) / stop(来源)；AC_CTRL_SOURCE_UI_KEY=0 [D3][D4] */
     const val AC_START = "start"
     const val AC_STOP = "stop"
     const val AC_POWER_ARG = 0
+    const val AC_POWER_SET_FID = "Ac.AC_POWER_STATE_SET" // 1 开 / 0 关 [D4 符号][D5]
 
-    /** setAcTemperature(区域, ℃整数, 来源=1, 单位=1)；来源传 0 会被判无效 [D3]。只支持整数 ℃。 */
+    /** setAcTemperature(区域, ℃整数, 来源=1, 单位=1)；来源传 0 会被判无效 [D3]。17–33 ℃ [D4] */
     const val AC_SET_TEMP = "setAcTemperature"
-    const val AC_SOURCE = 1
-    const val AC_TEMP_UNIT_CELSIUS = 1
+    const val AC_SOURCE = 1 // AC_CTRL_SOURCE_VOICE
+    const val AC_TEMP_UNIT_CELSIUS = 1 // AC_TEMPERATURE_UNIT_OC
     const val AC_TEMP_STEP = 1f
+    const val AC_TEMP_DRIVER_SET_FID = "Ac.AC_TEMP_MAIN_SET"
+    const val AC_TEMP_PASSENGER_SET_FID = "Ac.AC_TEMP_DEPUTY_SET"
 
-    /** setAcControlMode(模式, 来源)：0 自动 / 1 手动 [D3] */
+    /** setAcControlMode(模式, 来源)：0 自动 / 1 手动 [D3][D4] */
     const val AC_SET_CONTROL_MODE = "setAcControlMode"
+    const val AC_CONTROL_MODE_SET_FID = "Ac.AC_CTRL_MODE_SET"
 
-    /** setAcWindMode(模式, 来源) [D3] */
+    /** setAcWindMode(模式, 来源) [D3][D4] */
     const val AC_SET_WIND_MODE = "setAcWindMode"
+    const val AC_WIND_MODE_SET_FID = "Ac.AC_WIND_MODE_SET"
 
-    /** setAcCycleMode(模式, 来源)：0 内循环 / 1 外循环 [D3] */
+    /** setAcCycleMode(模式, 来源)：1 内循环 / 0 外循环 [D4] */
     const val AC_SET_CYCLE = "setAcCycleMode"
+    const val AC_CYCLE_SET_FID = "Ac.AC_CYCLE_MODE_SET"
 
-    /**
-     * 风量：命名接口 setAcWindLevel 在实车上无效 [D3]，改用通用 set(1000, fid, 档位)。
-     * fid 优先按符号解析，解析不到用 0x1DE0000C（DiLink 3 两台车 + Leopard 3 数值一致）。
-     */
-    const val AC_WIND_LEVEL_SET_SYMBOL = "Ac.AC_WIND_LEVEL_SET"
+    /** 风量：命名接口 setAcWindLevel 在 DiLink 3 实车上无效 [D3]，直接写 FID（0x1DE0000C 在 D3/D4/D5 数值一致） */
+    const val AC_WIND_LEVEL_SET_FID = "Ac.AC_WIND_LEVEL_SET"
     const val AC_WIND_LEVEL_SET_FALLBACK = 0x1DE0000C
 
-    /**
-     * 座椅：无命名接口，只能写 FID [D5]。先写开关（1 开 / 2 关），再写档位（1..5）。
-     * 只用车机上按符号解析出的 fid，不写死数值（座椅 fid 跨平台未确认一致）。
-     * 注意：Song L / 汉 EV 会对开关写入返回成功但不动作，所以必须依赖回读确认。
-     */
-    const val SEAT_SWITCH_ON = 1
-    const val SEAT_SWITCH_OFF = 2
-    val SEAT_HEAT_DRIVER_SET = "Ac.AC_MAIN_DRIVE_SEAT_HEATING_STATUS_SET" to "Ac.AC_MAIN_DRIVE_SEAT_HEATING_LEVEL_SET"
-    val SEAT_HEAT_PASSENGER_SET = "Ac.AC_PASSENGER_SEAT_HEATING_STATUS_SET" to "Ac.AC_PASSENGER_SEAT_HEATING_LEVEL_SET"
-    val SEAT_VENT_DRIVER_SET = "Ac.AC_MAIN_DRIVE_SEAT_VENTILATING_STATUS_SET" to "Ac.AC_MAIN_DRIVE_SEAT_VENTILATING_LEVEL_SET"
-    val SEAT_VENT_PASSENGER_SET = "Ac.AC_PASSENGER_SEAT_VENTILATING_STATUS_SET" to "Ac.AC_PASSENGER_SEAT_VENTILATING_LEVEL_SET"
+    /** 座椅：SettingDevice.setSeatHeatingState(座位, 状态) / setSeatVentilatingState，状态 = 档位 + 1 [D4] */
+    const val SEAT_SET_HEAT = "setSeatHeatingState"
+    const val SEAT_SET_VENT = "setSeatVentilatingState"
+    const val SEAT_HEAT_DRIVER_SET_FID = "Setting.SET_DRIVER_SEAT_HEATING_STATE_SET"
+    const val SEAT_HEAT_PASSENGER_SET_FID = "Setting.SET_PASSENGER_SEAT_HEATING_STATE_SET"
+    const val SEAT_VENT_DRIVER_SET_FID = "Setting.SET_DRIVER_SEAT_VENTILATING_STATE_SET"
+    const val SEAT_VENT_PASSENGER_SET_FID = "Setting.SET_PASSENGER_SEAT_VENTILATING_STATE_SET"
 
-    /** 前挡除霜：FID 写 1 [D5 同类：后除霜 1 开 / 0 关] */
-    const val AC_DEFROST_FRONT_SET_SYMBOL = "Ac.AC_DEFROST_FRONT_STATE_SET"
+    /** 前挡除霜：setAcDefrostState(区域, 状态, 来源)，AC_DEFROST_AREA_FRONT=1、STATE_ON=1，三个参数都是 1 与顺序无关 [D4] */
+    const val AC_SET_DEFROST = "setAcDefrostState"
+    const val AC_DEFROST_FRONT_SET_FID = "Ac.AC_DEFROST_FRONT_STATE_SET"
 
-    /** 快速降温：setAcMaxCoolingState(1)，仅见签名未实测 [?] */
-    const val AC_SET_MAX_COOLING = "setAcMaxCoolingState"
+    /** 快速降温：本固件无命名接口，写 FID AC_MAX_COOLING_STATE_SET = AC_MAX_COOLING_ON(1) [D4 符号] */
+    const val AC_MAX_COOLING_SET_FID = "Ac.AC_MAX_COOLING_STATE_SET"
+
+    /** 一键净化：写 FID AC_QUICK_CLEAN_AIR_SET = SET_QUICK_CLEAN_OPEN(1) [D4 符号] */
+    const val AC_QUICK_CLEAN_SET_FID = "Ac.AC_QUICK_CLEAN_AIR_SET"
 }
