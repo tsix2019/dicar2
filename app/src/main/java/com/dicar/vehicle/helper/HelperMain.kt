@@ -36,9 +36,19 @@ object HelperMain {
             while (true) {
                 val line = reader.readLine() ?: break
                 if (line.isBlank()) continue
-                val reply = runCatching { handle(line, reflect) }
-                    .getOrElse { "E ${it.javaClass.simpleName}:${it.message}" }
-                out.println(reply)
+
+                // 批量：BEGIN n 后面紧跟 n 行子请求，按序回 n 行应答（一轮轮询只用一次往返）
+                if (line.startsWith("BEGIN ")) {
+                    val n = line.removePrefix("BEGIN ").trim().toIntOrNull() ?: 0
+                    repeat(n) {
+                        val sub = reader.readLine()
+                        out.println(if (sub == null) "E 批量请求被截断" else safeHandle(sub, reflect))
+                    }
+                    out.flush()
+                    continue
+                }
+
+                out.println(safeHandle(line, reflect))
                 out.flush()
             }
         } catch (t: Throwable) {
@@ -48,6 +58,9 @@ object HelperMain {
             t.printStackTrace()
         }
     }
+
+    private fun safeHandle(line: String, r: HelperReflect): String =
+        runCatching { handle(line, r) }.getOrElse { "E ${it.javaClass.simpleName}:${it.message}" }
 
     private fun handle(line: String, r: HelperReflect): String {
         val p = line.trim().split(' ')

@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗：需用户在系统设置里单独允许「显示在其他应用上层」 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!--
       BYDAuto 权限。_GET/_SET 是签名级，第三方 App 拿不到，实际靠 BydPermissionContext 在进程内放行；
@@ -62,6 +64,10 @@
             android:name=".service.VehicleMonitorService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".service.FloatingWindowService"
+            android:exported="false" />
     </application>
 
 </manifest>

@@ -34,15 +34,23 @@ class AdbTransport(context: Context) {
         false
     }
 
+    /** 建立连接与辅助进程（已建立则直接返回），不可用时抛 [AdbUnavailableException]。 */
+    fun ensureConnected() = synchronized(lock) { ensureSession(); Unit }
+
     /** 发送一行请求，返回一行应答；连接/辅助进程异常时抛 [AdbUnavailableException]。 */
-    fun request(line: String): String = synchronized(lock) {
+    fun request(line: String): String = withSession { it.request(line) }
+
+    /** 批量请求：一次往返完成全部子请求。 */
+    fun requestBatch(lines: List<String>): List<String> = withSession { it.requestBatch(lines) }
+
+    private fun <T> withSession(block: (HelperSession) -> T): T = synchronized(lock) {
         val s = ensureSession()
         try {
-            s.request(line)
+            block(s)
         } catch (e: AdbUnavailableException) {
             throw e
         } catch (e: Exception) {
-            resetLocked()
+            resetLocked() // 流坏了就整条重建，下一轮重新握手
             throw AdbUnavailableException("与辅助进程通信失败：${e.message}", e)
         }
     }

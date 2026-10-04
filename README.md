@@ -32,6 +32,10 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 首次打开会自动启动前台服务，通知栏常驻「车速 | SOC | 空调」，通知上的「停止采集」可关闭服务。
 
+**界面**：顶栏可在「孪生」（主页：车辆俯视图 + 仪表 + 趋势曲线）和「卡片」（全量读数 + 空调控制）之间切换。
+顶栏的「悬浮窗」可在其他应用之上常驻一个小窗（车速 / SOC / 功率 / 转速），可拖动，点本体回主界面、点 ✕ 关闭；
+首次需要在系统设置里允许「显示在其他应用上层」。
+
 ## 3. 上车验证流程（重要）
 
 1. **设置 → 数据源选「自动」**：先尝试 BYDAuto，失败自动降级迪加；两者都不可用时首页顶部提示原因，所有数值显示 N/A。
@@ -81,7 +85,10 @@ app/src/main/java/com/dicar/vehicle/
 │       │   └── adb/                  内置 ADB 客户端（dadb）+ 辅助进程会话/行协议
 │       ├── diplus/DiPlusDataSource.kt  备用数据源：迪加 HTTP 127.0.0.1:8988
 │       └── mock/MockDataSource.kt      模拟数据（无车调 UI）
-├── ui/  MainViewModel + Compose 界面（动力 / 电池 / 空调 / 车身 / 其他 五张卡片，自适应列数）
+├── ui/  MainViewModel + Compose 界面
+│   ├── screen/TwinScreen.kt          孪生主页：车辆俯视图 + 四块仪表 + 趋势曲线
+│   ├── screen/DashboardScreen.kt     顶栏（孪生/卡片切换、悬浮窗、设置）+ 卡片视图
+│   └── components/                   仪表、车辆俯视图、曲线图、卡片与控件
 └── util/ ValueSanitizer（错误码/无效值 → null）、Format（null → N/A）
 ```
 

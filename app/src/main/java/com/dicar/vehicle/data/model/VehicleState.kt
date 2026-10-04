@@ -68,6 +68,7 @@ data class VehicleState(
     val seatbeltPassenger: Boolean? = null,
     val turnLeft: Boolean? = null,
     val turnRight: Boolean? = null,
+    val radar: Radar = Radar(),
 
     // ---------------- 其他 (F33-F37) ----------------
     val totalMileage: Float? = null,          // km
@@ -83,6 +84,13 @@ data class VehicleState(
     val timestamp: Long = 0L,
     val error: String? = null,                // 整个数据源不可用时的说明
 ) {
+    /** 仪表盘主转速：有发动机转速就用它，否则用电机转速（取绝对值较大的一侧）。 */
+    val displayRpm: Int?
+        get() = engineRpm ?: listOfNotNull(motorRpmFront, motorRpmRear).maxByOrNull { kotlin.math.abs(it) }
+
+    val displayRpmLabel: String
+        get() = if (engineRpm != null) "发动机转速" else "电机转速"
+
     /** 单体压差（mV），由最高/最低单体电压推算。 */
     val cellVoltageDiffMv: Float?
         get() = if (cellVoltageMax != null && cellVoltageMin != null) {
@@ -125,6 +133,45 @@ fun VehicleState.withDerivedValues(): VehicleState {
     }
     return if (batPower == batteryPower && instant == instantElecConsumption) this
     else copy(batteryPower = batPower, instantElecConsumption = instant)
+}
+
+/**
+ * 泊车雷达各探头的障碍等级（BYDAutoRadarDevice.getRadarProbeState(区域)）。
+ *
+ * 车机常量：RADAR_OBSTACLE_DISTANCE_MIN=0 / MAX=6（等级，越小越近）、SAFE=14（无障碍）。
+ * 等级与实际厘米的对应关系尚未在实车核对，先原样展示。[?]
+ */
+data class Radar(
+    val frontLeft: Int? = null,
+    val frontLeftMid: Int? = null,
+    val frontRightMid: Int? = null,
+    val frontRight: Int? = null,
+    val rearLeft: Int? = null,
+    val rearMid: Int? = null,
+    val rearRight: Int? = null,
+    val left: Int? = null,
+    val right: Int? = null,
+    val reverseSwitchOn: Boolean? = null,
+) {
+    /** 车机用 14 表示「安全/无障碍」，只有 0..6 才是真的探到东西。 */
+    private fun level(v: Int?): Int? = v?.takeIf { it in OBSTACLE_MIN..OBSTACLE_MAX }
+
+    val front: List<Int?> get() = listOf(level(frontLeft), level(frontLeftMid), level(frontRightMid), level(frontRight))
+    val rear: List<Int?> get() = listOf(level(rearLeft), level(rearMid), level(rearRight))
+    val sides: List<Int?> get() = listOf(level(left), level(right))
+
+    /** 最近的障碍等级（越小越近）；没有探到返回 null。 */
+    val nearest: Int? get() = (front + rear + sides).filterNotNull().minOrNull()
+
+    val hasAnyReading: Boolean
+        get() = listOf(frontLeft, frontLeftMid, frontRightMid, frontRight, rearLeft, rearMid, rearRight, left, right)
+            .any { it != null }
+
+    companion object {
+        const val OBSTACLE_MIN = 0
+        const val OBSTACLE_MAX = 6
+        const val SAFE = 14
+    }
 }
 
 /** 四轮/四门通用容器：FL 左前、FR 右前、RL 左后、RR 右后。 */

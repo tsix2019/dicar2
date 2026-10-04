@@ -26,7 +26,21 @@ interface BydAccess {
     fun callSetter(className: String, method: String, args: IntArray): CallResult
     fun writeFid(devId: Int, fid: Int, value: Int): CallResult
 
+    /** 一次读多项。默认逐条读；跨进程通道应覆盖成单次往返。 */
+    fun readBatch(requests: List<RawReq>): List<CallResult> = requests.map {
+        when (it) {
+            is RawReq.Getter -> readGetter(it.className, it.method, it.args)
+            is RawReq.Fid -> readFid(it.devId, it.fid, it.isFloat)
+        }
+    }
+
     fun close() {}
+}
+
+/** 与 [BydApiMap.Src] 解耦的底层读请求（FID 符号已解析成本车数值）。 */
+sealed interface RawReq {
+    data class Getter(val className: String, val method: String, val args: IntArray) : RawReq
+    data class Fid(val devId: Int, val fid: Int, val isFloat: Boolean) : RawReq
 }
 
 /** 进程内直连。FID 读写走 BYDAutoDeviceManager（同样用 BydDevice 包一层）。 */
@@ -62,24 +76,36 @@ class AdbBydAccess(private val transport: AdbTransport) : BydAccess {
 
     override fun probeAvailable(): Boolean = transport.isPortOpen()
 
-    override fun ensureReady() {
-        val reply = transport.request("PING")
-        check(reply == "OK") { "辅助进程异常应答：$reply" }
-    }
+    /** 会话还活着就直接复用，不每次都 PING（省一次往返）。 */
+    override fun ensureReady() = transport.ensureConnected()
 
     override fun readGetter(className: String, method: String, args: IntArray) =
-        parse(transport.request("MG $className $method ${args.size}${args.joinToString("") { " $it" }}"))
+        parse(transport.request(line("MG", className, method, args)))
 
     override fun readFid(devId: Int, fid: Int, isFloat: Boolean) =
         parse(transport.request("${if (isFloat) "GD" else "GI"} $devId $fid"))
 
     override fun callSetter(className: String, method: String, args: IntArray) =
-        parse(transport.request("MC $className $method ${args.size}${args.joinToString("") { " $it" }}"))
+        parse(transport.request(line("MC", className, method, args)))
 
     override fun writeFid(devId: Int, fid: Int, value: Int) =
         parse(transport.request("SI $devId $fid $value"))
 
+    override fun readBatch(requests: List<RawReq>): List<CallResult> {
+        if (requests.isEmpty()) return emptyList()
+        val lines = requests.map {
+            when (it) {
+                is RawReq.Getter -> line("MG", it.className, it.method, it.args)
+                is RawReq.Fid -> "${if (it.isFloat) "GD" else "GI"} ${it.devId} ${it.fid}"
+            }
+        }
+        return transport.requestBatch(lines).map(::parse)
+    }
+
     override fun close() = transport.reset()
+
+    private fun line(op: String, className: String, method: String, args: IntArray) =
+        "$op $className $method ${args.size}${args.joinToString("") { " $it" }}"
 
     private fun parse(reply: String) = parseReply(reply)
 

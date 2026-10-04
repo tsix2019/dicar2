@@ -23,6 +23,19 @@ class HelperSession(private val shell: AdbShellStream) {
         return readLine() ?: throw IllegalStateException("辅助进程已退出")
     }
 
+    /**
+     * 一次写出全部子请求、再按序收回等量应答：一轮轮询只有一次往返，
+     * 而不是每个字段一次（车机上 50+ 字段逐条问会明显发闷）。
+     */
+    fun requestBatch(lines: List<String>): List<String> {
+        if (lines.isEmpty()) return emptyList()
+        shell.write(buildString {
+            append("BEGIN ").append(lines.size).append('\n')
+            lines.forEach { append(it).append('\n') }
+        })
+        return List(lines.size) { readLine() ?: throw IllegalStateException("辅助进程已退出") }
+    }
+
     private fun writeLine(line: String) {
         shell.write(line + "\n")
     }

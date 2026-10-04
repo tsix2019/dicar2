@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -39,9 +40,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
     private val _probe = MutableStateFlow<ProbeUiState>(ProbeUiState.Idle)
     val probe: StateFlow<ProbeUiState> = _probe.asStateFlow()
 
+    /** 曲线图用的滚动样本（每次轮询追加一条）。 */
+    data class HistorySample(val speed: Float?, val power: Float?, val rpm: Float?, val soc: Float?)
+
+    private val _history = MutableStateFlow<List<HistorySample>>(emptyList())
+    val history: StateFlow<List<HistorySample>> = _history.asStateFlow()
+
     init {
         // 界面也持有一份轮询引用：即使前台服务没起来（权限被拒等），首页照样有数据
         repository.acquire()
+
+        viewModelScope.launch {
+            var lastTimestamp = 0L
+            state.collect { s ->
+                // 只按轮询节奏采样；乐观更新（点按空调等）不该在曲线上造出假点
+                if (s.timestamp == lastTimestamp) return@collect
+                lastTimestamp = s.timestamp
+                val sample = HistorySample(
+                    speed = s.speed,
+                    power = s.batteryPower ?: s.power,
+                    rpm = s.displayRpm?.toFloat(),
+                    soc = s.soc,
+                )
+                _history.update { (it + sample).takeLast(HISTORY_SIZE) }
+            }
+        }
     }
 
     override fun onCleared() {
@@ -117,5 +140,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
         private const val DEFAULT_TEMP = 22f
         const val MIN_FAN = 1
         const val MAX_FAN = 7
+        /** 曲线保留的样本数（1 秒一条，约 3 分钟）。 */
+        const val HISTORY_SIZE = 180
     }
 }

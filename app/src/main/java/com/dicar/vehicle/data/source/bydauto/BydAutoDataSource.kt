@@ -6,6 +6,7 @@ import com.dicar.vehicle.data.model.AcCycleMode
 import com.dicar.vehicle.data.model.CommandResult
 import com.dicar.vehicle.data.model.DataSourceType
 import com.dicar.vehicle.data.model.Openings
+import com.dicar.vehicle.data.model.Radar
 import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
 import com.dicar.vehicle.data.model.VehicleState
@@ -64,15 +65,57 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
     // 读
     // ------------------------------------------------------------------
 
+    // 两遍构建：第一遍把映射表里用到的来源全部登记下来，一次批量取回，第二遍再用缓存填值。
+    // 这样一轮轮询只有一次跨进程往返，而不是每个字段一次。
+    private var collecting = false
+    private val collected = LinkedHashSet<Src>()
+    private var cache: Map<Src, CallResult> = emptyMap()
+
     override suspend fun read(): VehicleState {
         acquire()
+
+        collecting = true
+        collected.clear()
+        cache = emptyMap()
+        buildState() // 丢弃结果，只为收集
+        collecting = false
+
+        cache = fetchAll(collected.toList())
+        return buildState()
+    }
+
+    private fun fetchAll(sources: List<Src>): Map<Src, CallResult> {
+        val result = HashMap<Src, CallResult>(sources.size)
+        val keys = ArrayList<Src>(sources.size)
+        val requests = ArrayList<RawReq>(sources.size)
+        for (src in sources) when (src) {
+            is Src.Getter -> {
+                keys += src
+                requests += RawReq.Getter(src.dev.className, src.method, src.args.toIntArray())
+            }
+            is Src.Fid -> {
+                val fid = featureIds.resolve(src.symbol)
+                if (fid == null) result[src] = CallResult.Missing // 本车固件没这个符号，不必上线问
+                else {
+                    keys += src
+                    requests += RawReq.Fid(src.dev.id, fid, src.isFloat)
+                }
+            }
+        }
+        val replies = current.readBatch(requests)
+        keys.forEachIndexed { i, key -> result[key] = replies.getOrElse(i) { CallResult.Missing } }
+        return result
+    }
+
+    private fun buildState(): VehicleState {
         val m = BydApiMap
         val tempOffset = m.BATTERY_TEMP_OFFSET.toDouble()
 
         return VehicleState(
             // 动力
             speed = float(m.SPEED, 0.0, 300.0),
-            engineRpm = int(m.ENGINE_RPM, 0, 10_000),
+            // 上限用车机自己的 ENGINE_SPEED_MAX：EV 行驶时该信号是 8191(0x1FFF) 无效标记，必须挡掉
+            engineRpm = int(m.ENGINE_RPM, 0, m.ENGINE_RPM_MAX),
             motorRpmFront = int(m.MOTOR_RPM_FRONT, -25_000, 25_000),
             motorRpmRear = int(m.MOTOR_RPM_REAR, -25_000, 25_000),
             power = float(m.POWER, -500.0, 1_000.0),
@@ -146,6 +189,18 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
             seatbeltPassenger = bool(m.SEATBELT_PASSENGER),
             turnLeft = bool(m.TURN_LEFT),
             turnRight = bool(m.TURN_RIGHT),
+            radar = Radar(
+                frontLeft = radarLevel(m.radar(m.RADAR_LEFT_FRONT)),
+                frontLeftMid = radarLevel(m.radar(m.RADAR_FRONT_LEFT_MID)),
+                frontRightMid = radarLevel(m.radar(m.RADAR_FRONT_RIGHT_MID)),
+                frontRight = radarLevel(m.radar(m.RADAR_RIGHT_FRONT)),
+                rearLeft = radarLevel(m.radar(m.RADAR_LEFT_REAR)),
+                rearMid = radarLevel(m.radar(m.RADAR_MIDDLE_REAR)),
+                rearRight = radarLevel(m.radar(m.RADAR_RIGHT_REAR)),
+                left = radarLevel(m.radar(m.RADAR_LEFT)),
+                right = radarLevel(m.radar(m.RADAR_RIGHT)),
+                reverseSwitchOn = bool(m.RADAR_REVERSE_SWITCH),
+            ),
 
             // 其他
             totalMileage = float(m.TOTAL_MILEAGE_KM, 0.0, 2_000_000.0)
@@ -179,15 +234,15 @@ class BydAutoDataSource(context: Context, transport: AdbTransport) : VehicleData
     private fun seatLevel(sources: List<Src>) =
         int(sources, 0, 3)?.let { (it - 1).coerceIn(0, BydApiMap.SEAT_MAX_LEVEL) }
 
+    /** 雷达障碍等级：0..6 为实测到的距离档，14 表示安全；原样保留，由 [Radar] 判定。 */
+    private fun radarLevel(sources: List<Src>) = int(sources, Radar.OBSTACLE_MIN, Radar.SAFE)
+
     private fun rawValue(src: Src): Any? {
-        val cr = when (src) {
-            is Src.Getter -> current.readGetter(src.dev.className, src.method, src.args.toIntArray())
-            is Src.Fid -> {
-                val fid = featureIds.resolve(src.symbol) ?: return null
-                current.readFid(src.dev.id, fid, src.isFloat)
-            }
+        if (collecting) {
+            collected += src // 收集阶段一律返回 null，好让每个候选来源都被登记
+            return null
         }
-        val raw = (cr as? CallResult.Value)?.value ?: return null
+        val raw = (cache[src] as? CallResult.Value)?.value ?: return null
         return if (src is Src.Getter && src.index != null && raw is IntArray) raw.getOrNull(src.index) else raw
     }
 

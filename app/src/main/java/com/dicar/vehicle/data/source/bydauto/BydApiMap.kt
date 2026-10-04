@@ -35,6 +35,7 @@ object BydApiMap {
         TYRE(1016, "android.hardware.bydauto.tyre.BYDAutoTyreDevice"),
         MOTOR(1020, "android.hardware.bydauto.motor.BYDAutoMotorDevice"),
         SETTING(1023, "android.hardware.bydauto.setting.BYDAutoSettingDevice"),
+        RADAR(1025, "android.hardware.bydauto.radar.BYDAutoRadarDevice"),
         OTA(1032, "android.hardware.bydauto.ota.BYDAutoOtaDevice"),
         DOOR_LOCK(1041, "android.hardware.bydauto.doorlock.BYDAutoDoorLockDevice"),
         SAFETY_BELT(1042, "android.hardware.bydauto.safetybelt.BYDAutoSafetyBeltDevice"),
@@ -70,7 +71,12 @@ object BydApiMap {
     // =====================================================================
 
     val SPEED = listOf(getter(Dev.SPEED, "getCurrentSpeed") /*[D4] double km/h*/, fid(Dev.SPEED, "Speed.SPEED_AUTO_SPEED", true) /*[D4]*/)
+    /**
+     * 发动机转速。车机常量 ENGINE_SPEED_MIN=0 / MAX=8000 [D4]；
+     * 超出上限的 8191(0x1FFF) 是 CAN 的「无效」标记（EV 行驶 / 发动机未启动时就是它），必须挡掉。
+     */
     val ENGINE_RPM = listOf(getter(Dev.ENGINE, "getEngineSpeed") /*[D4]*/)
+    const val ENGINE_RPM_MAX = 8000
     val MOTOR_RPM_FRONT = listOf(fid(Dev.ENGINE, "Engine.ENGINE_FRONT_MOTOR_SPEED") /*[D4]*/)
     val MOTOR_RPM_REAR = listOf(fid(Dev.ENGINE, "Engine.ENGINE_REAR_MOTOR_SPEED") /*[D4]*/)
 
@@ -119,6 +125,7 @@ object BydApiMap {
     val CHARGE_STATE_LABELS = mapOf(
         0 to "未充电", 1 to "充电中", 2 to "充电完成", 3 to "放电中", 4 to "充电终止",
         9 to "预约充电", 11 to "充电超时", 12 to "放电完成", 13 to "充电暂停",
+        15 to "未充电", // 实车停放时返回 15（常量表无定义，视作无充电活动）[D4 实测]
     )
 
     val RANGE_ELEC = listOf(getter(Dev.STATISTIC, "getElecDrivingRangeValue") /*[D4] km*/)
@@ -237,6 +244,23 @@ object BydApiMap {
     val TURN_SIGNAL_MASK = listOf(fid(Dev.LIGHT, "Light.LIGHT_TURN_SIGNAL_LIGHT"))
     const val TURN_LEFT_BIT = 2
     const val TURN_RIGHT_BIT = 4
+
+    /**
+     * 泊车雷达 [D4]：getRadarProbeState(区域) 返回障碍等级（0..6 越小越近，14 表示安全/无障碍）。
+     * 区域常量见 RADAR_AREA_*；另有 getAllRadarProbeStates() 一次返回全部，但数组下标与区域的
+     * 对应关系未在实车确认，这里逐区域读（批量传输下开销相同）。
+     */
+    const val RADAR_LEFT_FRONT = 1
+    const val RADAR_RIGHT_FRONT = 2
+    const val RADAR_LEFT_REAR = 3
+    const val RADAR_RIGHT_REAR = 4
+    const val RADAR_LEFT = 5
+    const val RADAR_RIGHT = 6
+    const val RADAR_FRONT_LEFT_MID = 7
+    const val RADAR_FRONT_RIGHT_MID = 8
+    const val RADAR_MIDDLE_REAR = 9
+    fun radar(area: Int) = listOf(getter(Dev.RADAR, "getRadarProbeState", area))
+    val RADAR_REVERSE_SWITCH = listOf(getter(Dev.RADAR, "getReverseRadarSwitchState"))
 
     // =====================================================================
     // 读：其他
