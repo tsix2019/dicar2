@@ -56,12 +56,28 @@
 ./gradlew testDebugUnitTest
 ```
 
+Release 版的签名密钥不在仓库里。自己编译时会自动退回 debug 签名，能正常安装使用；
+要用自己的正式密钥，在项目根目录放一个 `keystore.properties`（已被 `.gitignore` 忽略）：
+
+```properties
+storeFile=/path/to/your-release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
 ### 安装与首次使用
+
+APK 可以直接从 [Releases](https://github.com/tsix2019/dicar2/releases) 下载，也可以自己编译。
 
 ```bash
 adb connect <车机IP>:5555
 adb install -r app-release.apk
 ```
+
+> 如果你装过 0.1.0 之前自行编译的版本（调试签名），覆盖安装会报
+> `INSTALL_FAILED_UPDATE_INCOMPATIBLE`——Android 不允许签名变更。
+> 先 `adb uninstall com.dicar.vehicle` 再装即可，此后各版本都能直接覆盖升级。
 
 1. 车机开启无线 ADB。
 2. 打开 App，设置里选「自动」或「仅 BYDAuto」。
@@ -133,10 +149,16 @@ Requires JDK 17 and the Android SDK (platform 35 / build-tools 35); point `local
 
 ### Install
 
+Grab the APK from [Releases](https://github.com/tsix2019/dicar2/releases), or build it yourself.
+
 ```bash
 adb connect <head-unit-ip>:5555
 adb install -r app-release.apk
 ```
+
+> If you previously side-loaded a self-built (debug-signed) build from before 0.1.0, installing over
+> it fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` — Android does not allow a signing-key change.
+> Run `adb uninstall com.dicar.vehicle` once; every release from 0.1.0 on upgrades in place.
 
 Enable wireless ADB on the head unit, open the app, pick "Auto" or "BYDAuto only" in settings, and
 accept the "allow debugging" prompt on the head unit.

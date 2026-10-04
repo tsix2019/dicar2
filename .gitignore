@@ -10,3 +10,9 @@
 .externalNativeBuild/
 .cxx/
 *.apk
+
+# 签名密钥与口令：绝不入库。密钥本体放在仓库外（路径写在 keystore.properties 里），
+# 这几条是第二道保险——签名密钥泄露到公开仓库等于谁都能冒名发版。
+/keystore.properties
+*.jks
+*.keystore

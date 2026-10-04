@@ -1,4 +1,21 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+/**
+ * 发布签名配置。仓库里**没有**也**不该有**密钥和口令：
+ * 本机在项目根目录放一个 keystore.properties（已在 .gitignore 里），内容形如
+ *
+ *     storeFile=C:/path/to/release.jks
+ *     storePassword=...
+ *     keyAlias=...
+ *     keyPassword=...
+ *
+ * 文件不存在时（别人 clone 这个公开仓库的情况）自动退回 debug 签名，
+ * 保证 `./gradlew assembleRelease` 照样能跑通，只是装出来的是调试签名版。
+ */
+val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
+    Properties().apply { file.inputStream().use { load(it) } }
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -19,6 +36,20 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (keystoreProps != null) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // minSdk 28，v1(JAR) 已无必要；v3 默认不开，但只有 v3 支持以后轮换密钥
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -27,8 +58,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 个人自用、adb 侧载：直接复用 debug 签名，省去 keystore 配置
-            signingConfig = signingConfigs.getByName("debug")
+            // 有 keystore.properties 就用正式签名，否则退回 debug 签名（见文件顶部说明）
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
