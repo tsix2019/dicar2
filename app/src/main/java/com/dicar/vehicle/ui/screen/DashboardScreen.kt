@@ -74,6 +74,8 @@ fun DashboardScreen(viewModel: MainViewModel) {
     val floatingBlocks by viewModel.floatingBlocks.collectAsStateWithLifecycle()
     val floatingAlpha by viewModel.floatingAlpha.collectAsStateWithLifecycle()
     val twin3d by viewModel.twin3dEnabled.collectAsStateWithLifecycle()
+    val update by viewModel.update.collectAsStateWithLifecycle()
+    val autoCheckUpdate by viewModel.autoCheckUpdate.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -139,11 +141,15 @@ fun DashboardScreen(viewModel: MainViewModel) {
             sourceMode = sourceMode,
             probe = probe,
             twin3dEnabled = twin3d,
+            update = update,
+            autoCheckUpdate = autoCheckUpdate,
             floatingBlocks = floatingBlocks,
             floatingAlpha = floatingAlpha,
             onIntervalChange = viewModel::setRefreshInterval,
             onSourceModeChange = viewModel::setSourceMode,
             onTwin3dChange = viewModel::setTwin3dEnabled,
+            onCheckUpdate = viewModel::checkUpdate,
+            onAutoCheckUpdateChange = viewModel::setAutoCheckUpdate,
             onToggleFloatingBlock = viewModel::toggleFloatingBlock,
             onFloatingAlphaChange = viewModel::setFloatingAlpha,
             onRunProbe = viewModel::runProbe,

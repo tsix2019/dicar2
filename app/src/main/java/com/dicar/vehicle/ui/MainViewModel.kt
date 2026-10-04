@@ -13,6 +13,7 @@ import com.dicar.vehicle.data.model.QuickAction
 import com.dicar.vehicle.data.model.VehicleCommand
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Zone
+import com.dicar.vehicle.data.update.UpdateState
 import com.dicar.vehicle.ui.components.AcActions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,6 +87,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
                 _history.update { (it + HistorySample.of(s)).takeLast(HISTORY_SIZE) }
             }
         }
+
+        checkUpdateOnStartIfEnabled()
     }
 
     override fun onCleared() {
@@ -147,6 +150,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app), AcActions {
     val twin3dEnabled = settings.twin3dEnabled
 
     fun setTwin3dEnabled(enabled: Boolean) = settings.setTwin3dEnabled(enabled)
+
+    // ---------------- 更新检查 ----------------
+
+    private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val update: StateFlow<UpdateState> = _update.asStateFlow()
+
+    val autoCheckUpdate = settings.autoCheckUpdate
+
+    fun setAutoCheckUpdate(enabled: Boolean) {
+        settings.setAutoCheckUpdate(enabled)
+        // 刚打开就先查一次，否则要等下次启动才有反馈
+        if (enabled && _update.value is UpdateState.Idle) checkUpdate()
+    }
+
+    fun checkUpdate() {
+        if (_update.value == UpdateState.Checking) return
+        _update.value = UpdateState.Checking
+        viewModelScope.launch {
+            _update.value = container.updateChecker.check()
+        }
+    }
+
+    /** 启动时的自动检查。只在设置里显式打开过才会联网。 */
+    private fun checkUpdateOnStartIfEnabled() {
+        if (settings.autoCheckUpdate.value) checkUpdate()
+    }
 
     val floatingBlocks = settings.floatingBlocks
     val floatingAlpha = settings.floatingAlpha

@@ -2,7 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 仅用于访问本机迪加服务 127.0.0.1:8988（见 network_security_config），不连外网 -->
+    <!--
+      用于访问本机迪加服务 127.0.0.1:8988（见 network_security_config），
+      以及「检查更新」对 api.github.com 的一次匿名 GET（默认需手动触发）。
+    -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

@@ -11,7 +11,11 @@
 ## 简体中文
 
 运行在比亚迪 DiLink 车机上的本地车辆仪表与控制 App：读取整车数据、显示孪生仪表盘、
-控制空调与车窗，并提供可配置的悬浮窗。**纯本地运行，不上传任何数据。**
+控制空调与车窗，并提供可配置的悬浮窗。
+
+**车辆数据全部在本机处理，不上传任何内容。** 全 App 只有一处会访问外部网络——
+「检查更新」会向 GitHub 发一次匿名请求比对版本号，默认仅在你手动点击时发生
+（设置里可以打开「启动时自动检查」）。请求不携带任何车辆数据或设备标识。
 
 > ⚠️ 个人项目，与比亚迪官方无关。接口全部来自公开逆向资料，不同车型/固件差异很大，
 > 请自行评估风险。控制类功能（车窗、天窗、空调）会让车辆真实动作。
@@ -26,6 +30,7 @@
 | **控制** | 空调开关 / 温度 / 风量 / 出风模式 / 循环、座椅加热通风、四门车窗、天窗、遮阳帘、前挡除霜 |
 | **悬浮窗** | 浮在其他应用之上，内容（主读数 / 仪表 / 曲线 / 孪生图 / 明细）可自由勾选，透明度可调，可拖动 |
 | **前台服务** | 后台持续采集，通知栏常驻「车速 \| SOC \| 空调」 |
+| **检查更新** | 对比 GitHub 上的最新发布版本，可跳转发布页或直接下载 APK。默认手动触发；「启动时自动检查」是可选开关 |
 | **接口探测** | 一键导出车机上全部 `android.hardware.bydauto.*` 的类、常量、方法与当前读数，用于适配新车型 |
 
 <p align="center">
@@ -108,7 +113,12 @@ MIT。参考过的公开资料：[BYDMate](https://github.com/AndyShaman/BYDMate
 
 A local vehicle dashboard and control app for BYD DiLink head units: reads live vehicle data,
 renders a digital-twin dashboard, controls climate and windows, and offers a configurable
-floating overlay. **Everything runs on-device; nothing is uploaded.**
+floating overlay.
+
+**All vehicle data is processed on-device and never uploaded.** The app makes exactly one kind of
+external network request: the update check asks GitHub for the latest release tag, and by default
+that only happens when you tap "check for updates" (an opt-in "check on launch" toggle exists in
+settings). The request carries no vehicle data and no device identifier.
 
 > ⚠️ Personal project, not affiliated with BYD. All interfaces come from public
 > reverse-engineering work and vary a lot across models and firmware — use at your own risk.
@@ -124,6 +134,7 @@ floating overlay. **Everything runs on-device; nothing is uploaded.**
 | **Controls** | A/C power, temperature, fan, vent mode, recirculation, seat heating/ventilation, all four windows, sunroof, sunshade, windshield defrost |
 | **Floating overlay** | Floats above other apps; which blocks to show (readout / gauges / chart / twin view / details) and the opacity are configurable, and it is draggable |
 | **Foreground service** | Keeps polling in the background with a persistent "speed \| SoC \| A/C" notification |
+| **Update check** | Compares against the latest GitHub release; opens the release page or the APK directly. Manual by default; "check on launch" is opt-in |
 | **Interface probe** | One tap dumps every `android.hardware.bydauto.*` class, constant, method and current value from the head unit — the basis for porting to other models |
 
 ### How it gets the data

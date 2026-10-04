@@ -50,6 +50,21 @@ class SettingsStore(context: Context) {
         prefs.edit { putString(KEY_SOURCE, mode.name) }
     }
 
+    // ---------------- 更新检查 ----------------
+
+    /**
+     * 启动时自动检查新版本。默认**关**：检查会访问 GitHub，是全 App 唯一一处
+     * 外部网络请求，不该在用户没表态的情况下默默发出去。关掉时只有手动点
+     * 「检查更新」才联网。
+     */
+    private val _autoCheckUpdate = MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE, false))
+    val autoCheckUpdate: StateFlow<Boolean> = _autoCheckUpdate.asStateFlow()
+
+    fun setAutoCheckUpdate(enabled: Boolean) {
+        _autoCheckUpdate.value = enabled
+        prefs.edit { putBoolean(KEY_AUTO_UPDATE, enabled) }
+    }
+
     // ---------------- 孪生图 ----------------
 
     /**
@@ -107,5 +122,6 @@ class SettingsStore(context: Context) {
         private const val KEY_FLOAT_BLOCKS = "floating_blocks"
         private const val KEY_FLOAT_ALPHA = "floating_alpha"
         private const val KEY_TWIN_3D = "twin_3d_enabled"
+        private const val KEY_AUTO_UPDATE = "auto_check_update"
     }
 }

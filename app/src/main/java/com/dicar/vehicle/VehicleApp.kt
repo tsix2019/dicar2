@@ -9,6 +9,7 @@ import com.dicar.vehicle.data.source.bydauto.BydAutoProbe
 import com.dicar.vehicle.data.source.bydauto.adb.AdbTransport
 import com.dicar.vehicle.data.source.diplus.DiPlusDataSource
 import com.dicar.vehicle.data.source.mock.MockDataSource
+import com.dicar.vehicle.data.update.UpdateChecker
 
 class VehicleApp : Application() {
 
@@ -31,6 +32,7 @@ class AppContainer(context: Context) {
         sources = listOf(bydAuto, DiPlusDataSource(), MockDataSource()),
     )
     val probe = BydAutoProbe(context) { bydAuto.acquireAccess() }
+    val updateChecker = UpdateChecker(currentVersion = BuildConfig.VERSION_NAME)
 }
 
 val Context.appContainer: AppContainer

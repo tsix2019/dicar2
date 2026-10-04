@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 只允许对本机迪加服务（127.0.0.1:8988）走明文 HTTP；App 不访问任何外部网络 -->
+<!--
+  明文 HTTP 只放行本机迪加服务（127.0.0.1:8988）。
+  唯一的外部访问是「检查更新」，走 HTTPS 到 api.github.com，受 base-config 约束。
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">

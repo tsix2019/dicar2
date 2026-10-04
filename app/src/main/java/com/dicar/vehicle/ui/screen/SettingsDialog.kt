@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.background
+import com.dicar.vehicle.BuildConfig
+import com.dicar.vehicle.data.update.UpdateState
+import com.dicar.vehicle.ui.components.MetricRow
 import com.dicar.vehicle.data.SettingsStore
 import com.dicar.vehicle.data.SourceMode
 import com.dicar.vehicle.ui.ProbeUiState
@@ -49,11 +54,15 @@ fun SettingsDialog(
     sourceMode: SourceMode,
     probe: ProbeUiState,
     twin3dEnabled: Boolean,
+    update: UpdateState,
+    autoCheckUpdate: Boolean,
     floatingBlocks: Set<FloatingBlock>,
     floatingAlpha: Float,
     onIntervalChange: (Long) -> Unit,
     onSourceModeChange: (SourceMode) -> Unit,
     onTwin3dChange: (Boolean) -> Unit,
+    onCheckUpdate: () -> Unit,
+    onAutoCheckUpdateChange: (Boolean) -> Unit,
     onToggleFloatingBlock: (FloatingBlock) -> Unit,
     onFloatingAlphaChange: (Float) -> Unit,
     onRunProbe: () -> Unit,
@@ -146,6 +155,21 @@ fun SettingsDialog(
 
                 HorizontalDivider()
                 Text("关于", style = MaterialTheme.typography.titleSmall)
+                MetricRow("当前版本", BuildConfig.VERSION_NAME)
+                UpdateSection(
+                    state = update,
+                    autoCheck = autoCheckUpdate,
+                    onCheck = onCheckUpdate,
+                    onAutoCheckChange = onAutoCheckUpdateChange,
+                    onOpen = { url ->
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    },
+                )
                 TextButton(onClick = {
                     runCatching {
                         context.startActivity(
@@ -205,4 +229,93 @@ fun ProbeResultDialog(probe: ProbeUiState, onDismiss: () -> Unit) {
 }
 
 /** 项目开源地址，设置页里可以直接点开。 */
+/**
+ * 更新检查。手动点按为主，「启动时自动检查」默认关——检查会访问 GitHub，
+ * 是全 App 唯一一处外部网络请求，不该在用户没表态时默默发出去。
+ */
+@Composable
+private fun UpdateSection(
+    state: UpdateState,
+    autoCheck: Boolean,
+    onCheck: () -> Unit,
+    onAutoCheckChange: (Boolean) -> Unit,
+    onOpen: (String) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(onClick = onCheck, enabled = state != UpdateState.Checking) {
+            if (state == UpdateState.Checking) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("检查更新")
+        }
+        when (state) {
+            is UpdateState.UpToDate -> Text(
+                "已是最新版本",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            is UpdateState.Failed -> Text(
+                state.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            else -> Unit
+        }
+    }
+
+    if (state is UpdateState.Available) {
+        val release = state.release
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "发现新版本 ${release.version}" + (release.publishedOn?.let { "（$it）" } ?: ""),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            if (release.notes.isNotBlank()) {
+                Text(
+                    release.notes.lineSequence().take(UPDATE_NOTE_LINES).joinToString("\n").trim(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 不在 App 内直接下载安装：那需要 REQUEST_INSTALL_PACKAGES 权限，
+                // 对一个自用工具来说不值当。跳到发布页用车机浏览器下载即可。
+                TextButton(onClick = { onOpen(release.pageUrl) }) { Text("查看发布页") }
+                release.apkUrl?.let { url ->
+                    TextButton(onClick = { onOpen(url) }) { Text("下载 APK") }
+                }
+            }
+        }
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = autoCheck, onClick = { onAutoCheckChange(!autoCheck) }),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("启动时自动检查")
+            Text(
+                "检查会访问 GitHub，这是本 App 唯一一处外部网络请求；只发一次匿名请求，" +
+                    "不上传任何车辆数据。关闭时仅在你手动点击时联网。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = autoCheck, onCheckedChange = null)
+    }
+}
+
+private const val UPDATE_NOTE_LINES = 6
+
 const val PROJECT_URL = "https://github.com/tsix2019/dicar2"
