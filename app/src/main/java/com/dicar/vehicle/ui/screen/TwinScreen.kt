@@ -183,6 +183,9 @@ private fun TrendStrip(state: VehicleState, history: List<MainViewModel.HistoryS
             ChartLegend(series, vertical = true)
             ChartCanvas(series, Modifier.weight(1f).fillMaxHeight())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                // 雷达只在真的在工作时出现（倒车档或探头有读数）。常驻一个「雷达 N/A」
+                // 既占地方又没信息，而泊车时它恰好是最该看的一条。
+                radarSummary(state)?.let { (text, alert) -> StatusPill(text, alert = alert) }
                 StatusPill(acSummary(state))
                 val tyre = tyreSummary(state)
                 StatusPill(tyre.first, alert = tyre.second)
@@ -191,6 +194,17 @@ private fun TrendStrip(state: VehicleState, history: List<MainViewModel.HistoryS
             }
         }
     }
+}
+
+/**
+ * 泊车雷达摘要。雷达没在工作就返回 null（不显示这枚胶囊）。
+ * 返回 文案 to 是否告警；障碍进到 [RADAR_ALERT_LEVEL] 档以内算告警。
+ */
+private fun radarSummary(state: VehicleState): Pair<String, Boolean>? {
+    val radar = state.radar
+    if (!radar.hasAnyReading && radar.reverseSwitchOn != true) return null
+    val nearest = radar.nearest ?: return "雷达 无障碍" to false
+    return "雷达 $nearest 档" to (nearest <= RADAR_ALERT_LEVEL)
 }
 
 private fun acSummary(state: VehicleState): String = when (state.acOn) {
@@ -225,3 +239,6 @@ private const val MAX_DRIVE_KW = 200f
 private const val MAX_REGEN_KW = 100f
 private const val TYRE_MIN_KPA = 190f
 private const val TYRE_MAX_KPA = 300f
+
+/** 最近障碍到这一档以内，胶囊变红。0 最近、6 最远。 */
+private const val RADAR_ALERT_LEVEL = 2

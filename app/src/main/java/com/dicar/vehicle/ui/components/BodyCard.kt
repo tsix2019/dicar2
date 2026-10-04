@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.dicar.vehicle.data.model.Radar
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Wheels
 import com.dicar.vehicle.util.Format
@@ -59,6 +60,18 @@ fun BodyCard(state: VehicleState, modifier: Modifier = Modifier) {
             "左转向灯", Format.onOff(state.turnLeft),
             "右转向灯", Format.onOff(state.turnRight),
         )
+
+        HorizontalDivider()
+        SectionLabel("泊车雷达")
+        val radar = state.radar
+        MetricRow("倒车档", Format.onOff(radar.reverseSwitchOn))
+        // 逐探头列出来：等级到实际厘米的对应关系还没在实车核对，先原样展示，
+        // 方便对着车位边挪边看哪个探头在变（BydApiMap 里这项标的是 [?]）
+        MetricPair("前左", probe(radar.frontLeft), "前左中", probe(radar.frontLeftMid))
+        MetricPair("前右中", probe(radar.frontRightMid), "前右", probe(radar.frontRight))
+        MetricPair("后左", probe(radar.rearLeft), "后中", probe(radar.rearMid))
+        MetricPair("后右", probe(radar.rearRight), "侧左", probe(radar.left))
+        MetricRow("侧右", probe(radar.right))
     }
 }
 
@@ -100,6 +113,17 @@ private fun WheelGrid(pressure: Wheels<Float>, temp: Wheels<Float>) {
         cell("左后", pressure.rl, temp.rl, Modifier.weight(1f))
         cell("右后", pressure.rr, temp.rr, Modifier.weight(1f))
     }
+}
+
+/**
+ * 单个雷达探头的读数。车机常量里 0..6 是距离档（越小越近），14 表示安全/无障碍，
+ * 其余值按读不到处理。档位和实际厘米的对应关系尚未在实车核对。
+ */
+private fun probe(level: Int?): String = when {
+    level == null -> Format.NA
+    level == Radar.SAFE -> "无障碍"
+    level in Radar.OBSTACLE_MIN..Radar.OBSTACLE_MAX -> "$level 档"
+    else -> Format.NA
 }
 
 private fun seatbelt(fastened: Boolean?) = when (fastened) {

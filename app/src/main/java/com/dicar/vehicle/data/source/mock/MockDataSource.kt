@@ -6,6 +6,7 @@ import com.dicar.vehicle.data.model.CommandResult
 import com.dicar.vehicle.data.model.DataSourceType
 import com.dicar.vehicle.data.model.Openings
 import com.dicar.vehicle.data.model.QuickAction
+import com.dicar.vehicle.data.model.Radar
 import com.dicar.vehicle.data.model.VehicleCommand
 import com.dicar.vehicle.data.model.VehicleState
 import com.dicar.vehicle.data.model.Wheels
@@ -42,7 +43,9 @@ class MockDataSource : VehicleDataSource {
 
     override suspend fun read(): VehicleState {
         val t = (System.currentTimeMillis() - startedAt) / 1000.0
-        val speed = (60 + 40 * sin(t / 8)).toFloat().coerceAtLeast(0f)
+        // 下限要能真的到 0：原来是 60+40·sin，最低 20 km/h，车永远停不下来，
+        // 于是「驻车 / 倒车」相关的东西（雷达、能量流静止态）在无车调试时全测不到
+        val speed = (50 + 62 * sin(t / 9)).toFloat().coerceAtLeast(0f)
         val accel = (35 + 35 * sin(t / 3)).toFloat().coerceIn(0f, 100f)
         val brake = if (accel < 8f) 30f else 0f
         val motorPower = (accel * 1.6f - brake * 0.8f)
@@ -86,6 +89,7 @@ class MockDataSource : VehicleDataSource {
             // 车窗升降这些联动在无车调试时一次都跑不到，等于没被验收过。
             doors = bodyCycle(t),
             windowPercent = windowCycle(t),
+            radar = radarCycle(t, speed),
             sunroofPercent = 0,
             sunshadePercent = 40,
             tirePressure = Wheels(250f, 252f, 248f, 249f),
@@ -132,6 +136,30 @@ class MockDataSource : VehicleDataSource {
             rr = phase == 3,
             hood = phase == 4,
             trunk = phase == 5,
+        )
+    }
+
+    /**
+     * 泊车雷达演示：低速时当作在倒车，后方探头从「安全」逐步逼近到 0 档再退回。
+     * 原来这里完全不给雷达数据，导致孪生图上的雷达弧和读数在无车调试时根本不会出现。
+     */
+    private fun radarCycle(t: Double, speed: Float): Radar {
+        val parking = speed < 12f
+        if (!parking) return Radar(reverseSwitchOn = false)
+        // 0..6 来回扫，越小越近
+        val sweep = ((1 - kotlin.math.cos(t / 4)) / 2 * Radar.OBSTACLE_MAX).toInt()
+            .coerceIn(Radar.OBSTACLE_MIN, Radar.OBSTACLE_MAX)
+        return Radar(
+            frontLeft = Radar.SAFE,
+            frontLeftMid = Radar.SAFE,
+            frontRightMid = Radar.SAFE,
+            frontRight = Radar.SAFE,
+            rearLeft = (sweep + 1).coerceAtMost(Radar.OBSTACLE_MAX),
+            rearMid = sweep,
+            rearRight = (sweep + 2).coerceAtMost(Radar.OBSTACLE_MAX),
+            left = Radar.SAFE,
+            right = Radar.SAFE,
+            reverseSwitchOn = true,
         )
     }
 

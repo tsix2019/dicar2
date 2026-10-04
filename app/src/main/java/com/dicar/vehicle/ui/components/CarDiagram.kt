@@ -69,12 +69,21 @@ fun CarDiagram(state: VehicleState, modifier: Modifier = Modifier) {
     val driving = (state.speed ?: 0f) > 1f
     val charging = state.chargeGunConnected == true || state.chargeStatus?.contains("充电中") == true
 
+    // 雷达工作时整车缩小，给车头车尾的三道弧让出空间。
+    // 按 0.82 的高度占比画，弧会伸到画布外被卡片边界切掉；0.68 才刚好容得下
+    // （最外圈弧距车身约 0.23 个车长）。倒车时视野拉远也符合直觉。
+    val radarActive = state.radar.hasAnyReading || state.radar.reverseSwitchOn == true
+    val heightFraction by animateFloatAsState(
+        targetValue = if (radarActive) 0.68f else 0.82f,
+        label = "carScale",
+    )
+
     Canvas(modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
 
         // 轿车比例约 1:2.35。先按高度算，放不下再按宽度收，保证四角标注有地方写
-        var bodyH = h * 0.82f
+        var bodyH = h * heightFraction
         var bodyW = bodyH * CAR_ASPECT
         if (bodyW > w * 0.40f) {
             bodyW = w * 0.40f
@@ -274,7 +283,6 @@ fun CarDiagram(state: VehicleState, modifier: Modifier = Modifier) {
         // ---- 泊车雷达 ----
         // 只有「雷达真的在工作」时才画弧：读不到探头或者没倒车时画一圈灰弧，
         // 既不传达信息又会穿过中间的车速数字。
-        val radarActive = state.radar.hasAnyReading || state.radar.reverseSwitchOn == true
         if (radarActive) {
             drawRadar(state.radar.front, Offset(cx, top), upward = true, bodyW = bodyW, bodyH = bodyH, warn = warn, near = signal, far = charge, idle = outline)
             drawRadar(state.radar.rear, Offset(cx, bottom), upward = false, bodyW = bodyW, bodyH = bodyH, warn = warn, near = signal, far = charge, idle = outline)
